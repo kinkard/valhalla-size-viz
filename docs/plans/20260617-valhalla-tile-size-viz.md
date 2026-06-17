@@ -261,12 +261,12 @@ struct CacheKey {
 **Files:**
 - Modify: `README.md`
 
-- [ ] replace placeholder content with: 1-paragraph intent, screenshot placeholder, CLI usage table, `cargo run` example, `docker run` example pointing at `kinkard/valhalla-size-viz:latest`, License block (Apache-2.0 + MIT)
-- [ ] keep concise — mirror the rhythm of `../rati/README.md` and `../valhalla-debug/README.md`
-- [ ] document the three encoding modes in one sentence each ("identity = raw on-wire bytes; gzip = browser-friendly; zstd = best ratio")
-- [ ] mention that the published Docker Hub image is `linux/arm64` only (matches the workflow runner); users on amd64 should `docker build` locally
-- [ ] link to rati and Valhalla
-- [ ] no tests — verify by visual review
+- [x] replace placeholder content with: 1-paragraph intent, screenshot placeholder, CLI usage table, `cargo run` example, `docker run` example pointing at `kinkard/valhalla-size-viz:latest`, License block (Apache-2.0 + MIT)
+- [x] keep concise — mirror the rhythm of `../rati/README.md` and `../valhalla-debug/README.md`
+- [x] document the three encoding modes in one sentence each ("identity = raw on-wire bytes; gzip = browser-friendly; zstd = best ratio")
+- [x] mention that the published Docker Hub image is `linux/arm64` only (matches the workflow runner); users on amd64 should `docker build` locally
+- [x] link to rati and Valhalla
+- [x] no tests — verify by visual review
 
 ### Task 9: Verify acceptance criteria
 
