@@ -38,13 +38,6 @@ impl RatiClient {
         })
     }
 
-    pub fn with_client(http: reqwest::Client, base_url: impl Into<Arc<str>>) -> Self {
-        Self {
-            http,
-            base_url: base_url.into(),
-        }
-    }
-
     pub async fn fetch_size(
         &self,
         tile: TileId,

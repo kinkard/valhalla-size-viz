@@ -29,6 +29,7 @@ impl SizeCache {
         self.entries.insert(key, value);
     }
 
+    #[allow(dead_code)]
     pub fn len(&self) -> usize {
         self.entries.len()
     }

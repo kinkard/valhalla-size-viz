@@ -36,8 +36,11 @@ impl<'de> Deserialize<'de> for Encoding {
 
 #[derive(Debug, Clone, Copy)]
 pub struct LevelSpec {
+    #[allow(dead_code)]
     pub size_deg: f64,
+    #[allow(dead_code)]
     pub cols: u32,
+    #[allow(dead_code)]
     pub rows: u32,
     pub max_tile_id: u32,
 }

@@ -227,16 +227,16 @@ struct CacheKey {
 **Files:**
 - Modify: `src/main.rs`
 
-- [ ] `#[derive(Parser)] struct Config { #[arg(long, default_value_t = 3000)] port: u16, #[arg(long, default_value_t = 32)] concurrency: u16, #[arg(long, env = "RATI_URL")] rati_url: String }` — no `--web-dir` flag; we hardcode `web/index.html` like valhalla-debug
-- [ ] `AppState { rati: Arc<RatiClient>, cache: Arc<SizeCache>, concurrency: usize }`
-- [ ] runtime: `tokio::runtime::Builder::new_multi_thread()` with `worker_threads = min(available_parallelism, concurrency)` (mirrors valhalla-debug)
-- [ ] router: `GET /` → `serve_index_html`, `POST /api/tile-sizes` → `api::tile_sizes`, `GET /healthz` → `"OK"`, with `TraceLayer::new_for_http()`. **No CorsLayer** — frontend and API share the origin.
-- [ ] `serve_index_html` reads `web/index.html` at request time (so we can hot-edit during dev) — return 404 on missing, 500 on read error
-- [ ] graceful shutdown on Ctrl+C and SIGTERM (lift the pattern from valhalla-debug)
-- [ ] add `tracing_subscriber::fmt::init()` at the top of `main`
-- [ ] write tests: CLI parses `--rati-url http://… --port 4000 --concurrency 16`; defaults match docs (port=3000, concurrency=32)
-- [ ] write tests: `GET /healthz` returns 200 OK with body `"OK"` (via `tower::ServiceExt::oneshot`)
-- [ ] `cargo test` must pass; `cargo run -- --rati-url http://localhost:8050` boots cleanly (serves 404 for `/` until Task 7 adds the HTML)
+- [x] `#[derive(Parser)] struct Config { #[arg(long, default_value_t = 3000)] port: u16, #[arg(long, default_value_t = 32)] concurrency: u16, #[arg(long, env = "RATI_URL")] rati_url: String }` — no `--web-dir` flag; we hardcode `web/index.html` like valhalla-debug
+- [x] `AppState { rati: Arc<RatiClient>, cache: Arc<SizeCache>, concurrency: usize }`
+- [x] runtime: `tokio::runtime::Builder::new_multi_thread()` with `worker_threads = min(available_parallelism, concurrency)` (mirrors valhalla-debug)
+- [x] router: `GET /` → `serve_index_html`, `POST /api/tile-sizes` → `api::tile_sizes`, `GET /healthz` → `"OK"`, with `TraceLayer::new_for_http()`. **No CorsLayer** — frontend and API share the origin.
+- [x] `serve_index_html` reads `web/index.html` at request time (so we can hot-edit during dev) — return 404 on missing, 500 on read error
+- [x] graceful shutdown on Ctrl+C and SIGTERM (lift the pattern from valhalla-debug)
+- [x] add `tracing_subscriber::fmt::init()` at the top of `main`
+- [x] write tests: CLI parses `--rati-url http://… --port 4000 --concurrency 16`; defaults match docs (port=3000, concurrency=32)
+- [x] write tests: `GET /healthz` returns 200 OK with body `"OK"` (via `tower::ServiceExt::oneshot`)
+- [x] `cargo test` must pass; `cargo run -- --rati-url http://localhost:8050` boots cleanly (serves 404 for `/` until Task 7 adds the HTML)
 
 ### Task 7: Port the frontend, point it at our endpoint
 
