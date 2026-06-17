@@ -4,6 +4,8 @@ Visualize [Valhalla](https://github.com/valhalla/valhalla) graph tile sizes on a
 
 The tool is a small [axum](https://github.com/tokio-rs/axum) server that proxies tile size requests to a [rati](https://github.com/valhalla/rati) instance and caches results in memory. The frontend is a single MapLibre HTML page served by the same process.
 
+![screenshot](docs/screenshot.png)
+
 ## Usage
 
 ```
