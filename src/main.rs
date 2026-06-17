@@ -254,8 +254,18 @@ async fn fetch_tile_size(
     let path = tile.to_path();
     let url = format!("{}/tiles/{}", base_url.trim_end_matches('/'), path);
 
+    // Assumption: rati's archive holds raw `.gph` tiles. For identity that
+    // matches on-disk encoding, so HEAD returns Content-Length without
+    // transferring the body. For gzip/zstd rati must transcode on the fly —
+    // it doesn't set Content-Length on HEAD, so we fall back to GET.
+    let method = if encoding == Encoding::Identity {
+        reqwest::Method::HEAD
+    } else {
+        reqwest::Method::GET
+    };
+
     let response = http
-        .get(&url)
+        .request(method, &url)
         .header(header::ACCEPT_ENCODING, encoding.as_header_value())
         .send()
         .await?;
@@ -290,20 +300,15 @@ async fn fetch_tile_size(
         );
     }
 
-    // rati always sets Content-Length on tile GETs (axum derives it from the
-    // finite Bytes body it returns). If it's missing, surface it rather than
-    // silently misreport the size.
-    let len = response
-        .content_length()
-        .ok_or_else(|| FetchError::MissingContentLength { path: path.clone() })?;
-
-    // Drain the body so hyper can return the socket to the keep-alive pool
-    // (dropping an unread Response forces a connection close on HTTP/1.1).
-    let mut stream = response.bytes_stream();
-    while let Some(chunk) = stream.next().await {
-        chunk?;
-    }
-    Ok(FetchOutcome::Found(len))
+    // Read Content-Length straight from the header — `Response::content_length()`
+    // returns None for HEAD responses (no body) even when the header is set.
+    response
+        .headers()
+        .get(header::CONTENT_LENGTH)
+        .and_then(|v| v.to_str().ok())
+        .and_then(|s| s.parse::<u64>().ok())
+        .map(FetchOutcome::Found)
+        .ok_or(FetchError::MissingContentLength { path })
 }
 
 async fn tile_sizes(
@@ -445,7 +450,7 @@ fn build_router(state: AppState) -> Router {
             "/api/tile-sizes",
             post(tile_sizes).layer(DefaultBodyLimit::max(REQUEST_BODY_LIMIT)),
         )
-        .route("/healthz", get(healthz))
+        .route("/health", get(health))
         // Fallback covers countries.js, poly-data.js, and the poly/ tree.
         .fallback_service(ServeDir::new(WEB_DIR))
         .with_state(state)
@@ -484,7 +489,7 @@ async fn serve_index_html(path: impl Into<PathBuf>) -> Result<Html<String>, (Sta
     Ok(Html(contents))
 }
 
-async fn healthz() -> &'static str {
+async fn health() -> &'static str {
     "OK"
 }
 
@@ -731,7 +736,7 @@ mod tests {
     #[tokio::test]
     async fn fetch_500_returns_upstream_error_with_path() {
         let server = MockServer::start().await;
-        Mock::given(method("GET"))
+        Mock::given(method("HEAD"))
             .and(match_path("/tiles/0/000/529.gph"))
             .respond_with(ResponseTemplate::new(500))
             .mount(&server)
@@ -782,7 +787,7 @@ mod tests {
     #[tokio::test]
     async fn fetch_identity_with_no_content_encoding_header_is_not_a_mismatch() {
         let server = MockServer::start().await;
-        Mock::given(method("GET"))
+        Mock::given(method("HEAD"))
             .and(match_path("/tiles/0/000/529.gph"))
             .and(match_header("accept-encoding", "identity"))
             .respond_with(ResponseTemplate::new(200).set_body_bytes(vec![0u8; 42]))
@@ -803,7 +808,7 @@ mod tests {
     #[tokio::test]
     async fn base_url_trailing_slash_is_tolerated() {
         let server = MockServer::start().await;
-        Mock::given(method("GET"))
+        Mock::given(method("HEAD"))
             .and(match_path("/tiles/0/000/529.gph"))
             .respond_with(ResponseTemplate::new(200).set_body_bytes(vec![0u8; 3]))
             .mount(&server)
@@ -846,7 +851,7 @@ mod tests {
                     break;
                 }
             }
-            let response = b"HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\nContent-Encoding: identity\r\n\r\n5\r\nhello\r\n0\r\n\r\n";
+            let response = b"HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\nContent-Encoding: gzip\r\n\r\n5\r\nhello\r\n0\r\n\r\n";
             sock.write_all(response).await.unwrap();
             sock.flush().await.unwrap();
         });
@@ -855,7 +860,7 @@ mod tests {
             &http_client(),
             &format!("http://{addr}"),
             TileId { level: 0, id: 529 },
-            Encoding::Identity,
+            Encoding::Gzip,
         )
         .await
         .unwrap_err();
@@ -938,12 +943,12 @@ mod tests {
     #[tokio::test]
     async fn mixed_cached_and_uncached_preserves_order() {
         let server = MockServer::start().await;
-        Mock::given(method("GET"))
+        Mock::given(method("HEAD"))
             .and(match_path("/tiles/2/818/660.gph"))
             .respond_with(ResponseTemplate::new(200).set_body_bytes(vec![0u8; 2435]))
             .mount(&server)
             .await;
-        Mock::given(method("GET"))
+        Mock::given(method("HEAD"))
             .and(match_path("/tiles/1/051/234.gph"))
             .respond_with(ResponseTemplate::new(200).set_body_bytes(vec![0u8; 999]))
             .mount(&server)
@@ -1064,30 +1069,6 @@ mod tests {
         )
         .await;
         assert_eq!(status, StatusCode::BAD_REQUEST);
-    }
-
-    #[tokio::test]
-    async fn fetch_drains_body_to_enable_keep_alive() {
-        // Two sequential fetches against the same wiremock instance both
-        // succeed only when the first response's body is fully consumed —
-        // otherwise hyper closes the connection. We also assert the wiremock
-        // sees both requests with the expected sizes.
-        let server = MockServer::start().await;
-        Mock::given(method("GET"))
-            .and(match_path("/tiles/2/818/660.gph"))
-            .respond_with(ResponseTemplate::new(200).set_body_bytes(vec![0xCDu8; 4096]))
-            .mount(&server)
-            .await;
-
-        let client = http_client();
-        let first = fetch_tile_size(&client, &server.uri(), tile_2_818_660(), Encoding::Identity)
-            .await
-            .unwrap();
-        let second = fetch_tile_size(&client, &server.uri(), tile_2_818_660(), Encoding::Identity)
-            .await
-            .unwrap();
-        assert_eq!(first, FetchOutcome::Found(4096));
-        assert_eq!(second, FetchOutcome::Found(4096));
     }
 
     #[tokio::test]
@@ -1301,13 +1282,13 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn healthz_returns_ok() {
+    async fn health_returns_ok() {
         let server = MockServer::start().await;
         let app = build_router(test_state(&server.uri(), 4));
         let resp = app
             .oneshot(
                 Request::builder()
-                    .uri("/healthz")
+                    .uri("/health")
                     .body(Body::empty())
                     .unwrap(),
             )
