@@ -22,9 +22,9 @@ Options:
 
 The UI exposes three transfer encodings to measure:
 
-- **identity** — raw on-wire bytes, no compression
-- **gzip** — broadly supported, browser-friendly
-- **zstd** — best compression ratio, what rati prefers when both are accepted
+- **none** (default) — raw on-wire bytes, no compression. Fast: rati answers via HEAD, so no body transfer.
+- **gzip** — broadly supported, browser-friendly. Full GET.
+- **zstd** — best compression ratio, what rati prefers when both are accepted. Full GET.
 
 ## HTTP API
 

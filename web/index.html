@@ -599,15 +599,15 @@
       <div style="font-size:12px; color:#555; margin-bottom:4px; font-weight:600;">Compression</div>
       <div style="display:flex; gap:12px; font-size:12px;">
         <label style="display:flex; align-items:center; gap:4px; cursor:pointer;">
-          <input type="radio" name="encoding" id="enc-identity" value="identity">
-          <span>identity (raw)</span>
+          <input type="radio" name="encoding" id="enc-identity" value="identity" checked>
+          <span>none</span>
         </label>
         <label style="display:flex; align-items:center; gap:4px; cursor:pointer;">
           <input type="radio" name="encoding" id="enc-gzip" value="gzip">
           <span>gzip</span>
         </label>
         <label style="display:flex; align-items:center; gap:4px; cursor:pointer;">
-          <input type="radio" name="encoding" id="enc-zstd" value="zstd" checked>
+          <input type="radio" name="encoding" id="enc-zstd" value="zstd">
           <span>zstd</span>
         </label>
       </div>
@@ -1025,7 +1025,7 @@ function hideProgress() {
 // ---------------------------------------------------------------------------
 // Compression / last selection state
 // ---------------------------------------------------------------------------
-let currentEncoding = 'zstd';
+let currentEncoding = 'identity';
 let lastSelection = { uniqueTiles: null, tileSets: null };
 
 // ---------------------------------------------------------------------------
@@ -3064,7 +3064,7 @@ document.querySelectorAll('input[name="cache-mode"]').forEach(radio => {
 document.querySelectorAll('input[name="encoding"]').forEach(radio => {
   radio.addEventListener('change', async () => {
     const checked = document.querySelector('input[name="encoding"]:checked');
-    currentEncoding = checked ? checked.value : 'zstd';
+    currentEncoding = checked ? checked.value : 'identity';
     if (lastSelection.uniqueTiles && lastSelection.uniqueTiles.length && lastSelection.tileSets) {
       let sizeResults;
       try {
