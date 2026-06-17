@@ -195,16 +195,16 @@ struct CacheKey {
 - Create: `src/upstream.rs`
 - Modify: `src/main.rs` (add `mod upstream;`)
 
-- [ ] `RatiClient { http: reqwest::Client, base_url: Arc<str> }`
-- [ ] constructor builds `reqwest::Client` with `.no_gzip().no_brotli().no_deflate()` so reqwest does not transparently decompress
-- [ ] `async fn fetch_size(&self, tile: TileId, encoding: Encoding) -> Result<FetchOutcome, FetchError>` where `FetchOutcome` is `Found(u64) | Missing`
-- [ ] `FetchError` variants: `Network(reqwest::Error)`, `Upstream { status: u16, path: String }` — the path is included so log lines are debuggable
-- [ ] build URL `{base_url}/tiles/{tile.to_path()}`, set `Accept-Encoding` header to the requested encoding
-- [ ] stream body via `response.bytes_stream()`, fold chunk lengths into a `u64` counter (no full-body allocation)
-- [ ] map status 200 → `Found(bytes)`, 404 → `Missing`, other → `FetchError::Upstream { status, path }`
-- [ ] if `Content-Encoding` on response differs from request, log `warn!(tile = %tile.to_path(), requested, got, "encoding mismatch")` and still count bytes
-- [ ] write tests with `wiremock` covering: 200 with body of N bytes → `Found(N)`; 404 → `Missing`; 500 → `FetchError::Upstream` with path populated; encoding mismatch logs warn but returns `Found`
-- [ ] `cargo test` must pass
+- [x] `RatiClient { http: reqwest::Client, base_url: Arc<str> }`
+- [x] constructor builds `reqwest::Client` with `.no_gzip().no_brotli().no_deflate()` so reqwest does not transparently decompress
+- [x] `async fn fetch_size(&self, tile: TileId, encoding: Encoding) -> Result<FetchOutcome, FetchError>` where `FetchOutcome` is `Found(u64) | Missing`
+- [x] `FetchError` variants: `Network(reqwest::Error)`, `Upstream { status: u16, path: String }` — the path is included so log lines are debuggable
+- [x] build URL `{base_url}/tiles/{tile.to_path()}`, set `Accept-Encoding` header to the requested encoding
+- [x] stream body via `response.bytes_stream()`, fold chunk lengths into a `u64` counter (no full-body allocation)
+- [x] map status 200 → `Found(bytes)`, 404 → `Missing`, other → `FetchError::Upstream { status, path }`
+- [x] if `Content-Encoding` on response differs from request, log `warn!(tile = %tile.to_path(), requested, got, "encoding mismatch")` and still count bytes
+- [x] write tests with `wiremock` covering: 200 with body of N bytes → `Found(N)`; 404 → `Missing`; 500 → `FetchError::Upstream` with path populated; encoding mismatch logs warn but returns `Found`
+- [x] `cargo test` must pass
 
 ### Task 5: Batch tile-sizes endpoint
 
