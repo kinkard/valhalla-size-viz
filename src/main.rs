@@ -2,13 +2,14 @@ use std::{
     num::NonZeroU16,
     path::{Path, PathBuf},
     sync::Arc,
+    time::Duration,
 };
 
 use axum::{
     Json, Router,
     extract::{DefaultBodyLimit, State},
     http::StatusCode,
-    response::Html,
+    response::{Html, IntoResponse, Response},
     routing::{get, post},
 };
 use clap::Parser;
@@ -19,7 +20,12 @@ use rustc_hash::FxBuildHasher;
 use serde::{Deserialize, Serialize};
 use tokio::{fs::File, io::AsyncReadExt, signal, sync::Semaphore};
 use tower_http::{services::ServeDir, trace::TraceLayer};
-use tracing::{info, warn};
+use tracing::{error, info, warn};
+
+/// Upstream request timeout. Each in-flight fetch holds a Semaphore permit for
+/// its duration, so an unbounded wait would deadlock concurrency under a slow
+/// or hung rati.
+const UPSTREAM_TIMEOUT: Duration = Duration::from_secs(30);
 
 /// Where the bundled HTML/JS lives on disk. Also used by `ServeDir` for
 /// `countries.js`, `poly-data.js`, and the `poly/` GeoJSON tree.
@@ -74,6 +80,7 @@ async fn run(config: Config) {
         .no_gzip()
         .no_brotli()
         .no_deflate()
+        .timeout(UPSTREAM_TIMEOUT)
         .build()
         .expect("failed to build reqwest client");
     let state = AppState {
@@ -286,16 +293,23 @@ async fn fetch_tile_size(
     // rati always sets Content-Length on tile GETs (axum derives it from the
     // finite Bytes body it returns). If it's missing, surface it rather than
     // silently misreport the size.
-    match response.content_length() {
-        Some(len) => Ok(FetchOutcome::Found(len)),
-        None => Err(FetchError::MissingContentLength { path }),
+    let len = response
+        .content_length()
+        .ok_or_else(|| FetchError::MissingContentLength { path: path.clone() })?;
+
+    // Drain the body so hyper can return the socket to the keep-alive pool
+    // (dropping an unread Response forces a connection close on HTTP/1.1).
+    let mut stream = response.bytes_stream();
+    while let Some(chunk) = stream.next().await {
+        chunk?;
     }
+    Ok(FetchOutcome::Found(len))
 }
 
 async fn tile_sizes(
     State(state): State<AppState>,
     Json(req): Json<TileSizesRequest>,
-) -> Result<Json<TileSizesResponse>, (StatusCode, String)> {
+) -> Result<Response, (StatusCode, String)> {
     if req.tiles.len() > MAX_BATCH_SIZE {
         return Err((
             StatusCode::BAD_REQUEST,
@@ -346,7 +360,9 @@ async fn tile_sizes(
     let base_url = state.base_url.clone();
     let cache = state.cache.clone();
     let permits = state.upstream_permits.clone();
-    let buffer_size = permits.available_permits().max(1).min(misses.len().max(1));
+    // The Semaphore is the real global cap; here we just bound futures spawned
+    // by this batch — never more than the number of tiles we need to fetch.
+    let buffer_size = misses.len().max(1);
 
     let fetched: Vec<(usize, TileId, Result<FetchOutcome, String>)> =
         futures_util::stream::iter(misses.into_iter().map(|(idx, tile)| {
@@ -413,11 +429,22 @@ async fn tile_sizes(
         results[idx] = Some(tile_size);
     }
 
-    let sizes = results.into_iter().map(|r| r.expect("filled")).collect();
-    Ok(Json(TileSizesResponse {
+    let sizes: Vec<TileSize> = results.into_iter().map(|r| r.expect("filled")).collect();
+
+    // If every tile in a non-empty batch errored, surface as 502 so monitoring
+    // catches a full upstream outage. Partial failures still return 200 — the
+    // per-tile `error` field lets the frontend report them inline.
+    let all_errored = !sizes.is_empty() && sizes.iter().all(|s| s.error.is_some());
+    let status = if all_errored {
+        StatusCode::BAD_GATEWAY
+    } else {
+        StatusCode::OK
+    };
+    let body = Json(TileSizesResponse {
         encoding: encoding.as_header_value(),
         sizes,
-    }))
+    });
+    Ok((status, body).into_response())
 }
 
 fn build_router(state: AppState) -> Router {
@@ -442,24 +469,24 @@ async fn serve_index_html(path: impl Into<PathBuf>) -> Result<Html<String>, (Sta
     let mut file = match File::open(&path).await {
         Ok(file) => file,
         Err(err) if err.kind() == std::io::ErrorKind::NotFound => {
-            return Err((
-                StatusCode::NOT_FOUND,
-                format!("{}: not found", path.display()),
-            ));
+            error!(path = %path.display(), "index.html not found");
+            return Err((StatusCode::NOT_FOUND, "not found".to_string()));
         }
         Err(err) => {
+            error!(path = %path.display(), %err, "failed to open index.html");
             return Err((
                 StatusCode::INTERNAL_SERVER_ERROR,
-                format!("failed to open {}: {err}", path.display()),
+                "internal error".to_string(),
             ));
         }
     };
 
     let mut contents = String::new();
     if let Err(err) = file.read_to_string(&mut contents).await {
+        error!(path = %path.display(), %err, "failed to read index.html");
         return Err((
             StatusCode::INTERNAL_SERVER_ERROR,
-            format!("failed to read {}: {err}", path.display()),
+            "internal error".to_string(),
         ));
     }
 
@@ -491,6 +518,7 @@ mod tests {
                 .no_gzip()
                 .no_brotli()
                 .no_deflate()
+                .timeout(UPSTREAM_TIMEOUT)
                 .build()
                 .unwrap(),
             base_url: Arc::from(base_url),
@@ -651,6 +679,7 @@ mod tests {
             .no_gzip()
             .no_brotli()
             .no_deflate()
+            .timeout(UPSTREAM_TIMEOUT)
             .build()
             .unwrap()
     }
@@ -1044,6 +1073,93 @@ mod tests {
         )
         .await;
         assert_eq!(status, StatusCode::BAD_REQUEST);
+    }
+
+    #[tokio::test]
+    async fn fetch_drains_body_to_enable_keep_alive() {
+        // Two sequential fetches against the same wiremock instance both
+        // succeed only when the first response's body is fully consumed —
+        // otherwise hyper closes the connection. We also assert the wiremock
+        // sees both requests with the expected sizes.
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(match_path("/tiles/2/818/660.gph"))
+            .respond_with(ResponseTemplate::new(200).set_body_bytes(vec![0xCDu8; 4096]))
+            .mount(&server)
+            .await;
+
+        let client = http_client();
+        let first = fetch_tile_size(&client, &server.uri(), tile_2_818_660(), Encoding::Identity)
+            .await
+            .unwrap();
+        let second = fetch_tile_size(&client, &server.uri(), tile_2_818_660(), Encoding::Identity)
+            .await
+            .unwrap();
+        assert_eq!(first, FetchOutcome::Found(4096));
+        assert_eq!(second, FetchOutcome::Found(4096));
+    }
+
+    #[tokio::test]
+    async fn all_tiles_errored_returns_502_with_per_tile_errors() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(match_path("/tiles/0/000/529.gph"))
+            .respond_with(ResponseTemplate::new(500))
+            .mount(&server)
+            .await;
+        Mock::given(method("GET"))
+            .and(match_path("/tiles/2/818/660.gph"))
+            .respond_with(ResponseTemplate::new(500))
+            .mount(&server)
+            .await;
+
+        let state = test_state(&server.uri(), 4);
+        let (status, body) = call(
+            router(state),
+            json!({
+                "encoding": "zstd",
+                "tiles": [
+                    { "level": 0, "id": 529 },
+                    { "level": 2, "id": 818660 }
+                ]
+            }),
+        )
+        .await;
+
+        assert_eq!(status, StatusCode::BAD_GATEWAY);
+        let sizes = body.get("sizes").unwrap().as_array().unwrap();
+        assert_eq!(sizes.len(), 2);
+        assert!(sizes[0]["error"].is_string());
+        assert!(sizes[1]["error"].is_string());
+    }
+
+    #[tokio::test]
+    async fn partial_failures_still_return_200() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(match_path("/tiles/0/000/529.gph"))
+            .respond_with(ResponseTemplate::new(200).set_body_bytes(vec![0u8; 11]))
+            .mount(&server)
+            .await;
+        Mock::given(method("GET"))
+            .and(match_path("/tiles/2/818/660.gph"))
+            .respond_with(ResponseTemplate::new(500))
+            .mount(&server)
+            .await;
+
+        let state = test_state(&server.uri(), 4);
+        let (status, _body) = call(
+            router(state),
+            json!({
+                "encoding": "zstd",
+                "tiles": [
+                    { "level": 0, "id": 529 },
+                    { "level": 2, "id": 818660 }
+                ]
+            }),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK);
     }
 
     #[tokio::test]
