@@ -40,7 +40,7 @@ The tool ships as a Docker image and a `cargo run` binary, mirroring the structu
 - **Unit tests** (required per task): cover tile path encoding, encoding negotiation, cache hit/miss semantics, batch request parsing.
 - **Upstream tests** (Task 4, Task 5): `wiremock` simulates rati. Handlers tested via `tower::ServiceExt::oneshot` against the Router (no `axum-test` dep).
 - **Integration smoke** (manual, end of plan): start the binary against a running rati, open the page in a browser, draw a bbox, confirm sizes render with each encoding.
-- **CI checks** wired via `Dockerfile.test`: `cargo fmt --check`, `cargo clippy -- -Dwarnings`, `cargo test`. `cargo deny` is intentionally not run in CI; we'll keep `deny.toml` current as a convenience for local checks but won't gate on it.
+- **CI checks** run natively on `ubuntu-latest` via `.github/workflows/sanity_checks.yml`: `cargo fmt --check`, `cargo clippy -- -Dwarnings`, `cargo test`. No Docker layer — the crate has no system deps. `cargo deny` is intentionally not run in CI; we'll keep `deny.toml` current as a convenience for local checks but won't gate on it.
 
 ## Progress Tracking
 
@@ -295,6 +295,9 @@ The user flagged these mid-execution; they supersede earlier plan decisions wher
 - **Tokio worker_threads cap at 4, decoupled from `--concurrency`.** Async tasks share threads — you don't need 32 OS threads to issue 32 concurrent HTTP fetches. The runtime should be hardcoded to ~4 workers; `--concurrency` only bounds upstream in-flight requests (via `Semaphore` or `buffered`).
 - **Drop `src/cache.rs`. Don't test trivial type aliases.** `pub type SizeCache = DashMap<…>` doesn't deserve its own file or unit tests — DashMap is tested upstream. Move `CacheKey` and the alias inline where they're used.
 - **Use the response's `Content-Length` header in `RatiClient::fetch_size`** instead of streaming and counting bytes. rati always sets `Content-Length` on tile GETs (axum derives it from the finite `Bytes` body it returns, including any re-encoded content). Trust that header. The streaming counter is dead weight.
+- **Drop the `RatiClient` struct.** A struct with one constructor and one method (`fetch_size`) is Java-vibe ceremony. Store `reqwest::Client` + base URL in `AppState` directly; turn `fetch_size` into a free function.
+- **Collapse the module split into a single `src/main.rs`.** The split into `api.rs` + `tiles.rs` + `upstream.rs` is over-organized for a ~600-line tool. The reference projects (`../rati`, `../valhalla-debug`) keep everything in one file. Match that.
+- **Drop `Dockerfile.test`; run CI natively on the GitHub Actions runner.** The crate has no system dependencies — `dtolnay/rust-toolchain@stable` + `cargo fmt --check` + `cargo clippy -Dwarnings` + `cargo test` is faster than building a docker image for every push. Mirror `https://github.com/kinkard/polyline-iter/blob/main/.github/workflows/sanity_checks.yml`.
 
 ## Post-Completion
 
