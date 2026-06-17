@@ -1,0 +1,3746 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Valhalla Tile Size Visualizer</title>
+<link rel="stylesheet" href="https://unpkg.com/maplibre-gl@5.18.0/dist/maplibre-gl.css">
+<script src="https://unpkg.com/maplibre-gl@5.18.0/dist/maplibre-gl.js"></script>
+<script src="https://unpkg.com/@turf/turf@7/turf.min.js"></script>
+<script src="countries.js"></script>
+<script src="poly-data.js"></script>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+    display: flex;
+    height: 100vh;
+    overflow: hidden;
+    color: #333;
+  }
+
+  /* --- Sidebar --- */
+  #sidebar {
+    width: 320px;
+    min-width: 320px;
+    height: 100vh;
+    overflow-y: auto;
+    background: #f8f9fa;
+    border-right: 1px solid #dee2e6;
+    padding: 16px;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+  }
+
+  #sidebar h1 {
+    font-size: 18px;
+    font-weight: 700;
+    margin-bottom: 4px;
+  }
+
+  #sidebar h2 {
+    font-size: 14px;
+    font-weight: 600;
+    margin-bottom: 4px;
+    color: #555;
+  }
+
+  .section {
+    background: #fff;
+    border: 1px solid #dee2e6;
+    border-radius: 6px;
+    padding: 12px;
+  }
+
+  .section-title {
+    font-size: 13px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    color: #888;
+    margin-bottom: 8px;
+  }
+
+  /* Mode selector */
+  .mode-tabs {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px;
+  }
+
+  .mode-tabs label {
+    font-size: 12px;
+    padding: 4px 10px;
+    border: 1px solid #ccc;
+    border-radius: 4px;
+    cursor: pointer;
+    background: #fff;
+    transition: background 0.15s, border-color 0.15s;
+  }
+
+  .mode-tabs input[type="radio"] {
+    display: none;
+  }
+
+  .mode-tabs input[type="radio"]:checked + label {
+    background: #0d6efd;
+    color: #fff;
+    border-color: #0d6efd;
+  }
+
+  /* Settings */
+  .setting-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    font-size: 13px;
+    margin-bottom: 6px;
+  }
+
+  .setting-row:last-child { margin-bottom: 0; }
+
+  .setting-row input[type="text"],
+  .setting-row input[type="number"] {
+    width: 140px;
+    padding: 3px 6px;
+    font-size: 12px;
+    border: 1px solid #ccc;
+    border-radius: 3px;
+  }
+
+  /* Results */
+  .results-summary {
+    font-size: 13px;
+    line-height: 1.6;
+  }
+
+  .level-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 13px;
+    margin-bottom: 4px;
+  }
+
+  .level-dot {
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    flex-shrink: 0;
+  }
+
+  .level-dot.l0 { background: #d62728; }
+  .level-dot.l1 { background: #ff7f0e; }
+  .level-dot.l2 { background: #2ca02c; }
+  .level-dot.missing { background: #999999; }
+
+  .total-row {
+    font-weight: 600;
+    font-size: 14px;
+    margin-top: 6px;
+    padding-top: 6px;
+    border-top: 1px solid #dee2e6;
+  }
+
+  /* Tile list */
+  .tile-list {
+    max-height: 300px;
+    overflow-y: auto;
+    font-size: 12px;
+    font-family: 'SF Mono', Monaco, Consolas, monospace;
+  }
+
+  .tile-item {
+    padding: 3px 0;
+    border-bottom: 1px solid #f0f0f0;
+    display: flex;
+    justify-content: space-between;
+  }
+
+  .tile-item.missing {
+    color: #999;
+    text-decoration: line-through;
+  }
+
+  .tile-item.clickable {
+    cursor: pointer;
+  }
+
+  .tile-item.clickable:hover {
+    background: #f0f4ff;
+  }
+
+  .tile-item.highlighted {
+    background: #fff3cd;
+  }
+
+  /* Buttons */
+  .btn {
+    padding: 6px 12px;
+    font-size: 13px;
+    border: 1px solid #ccc;
+    border-radius: 4px;
+    background: #fff;
+    cursor: pointer;
+  }
+
+  .btn:hover { background: #e9ecef; }
+
+  .btn-primary {
+    background: #0d6efd;
+    color: #fff;
+    border-color: #0d6efd;
+  }
+
+  .btn-primary:hover { background: #0b5ed7; }
+
+  .btn-danger {
+    background: #dc3545;
+    color: #fff;
+    border-color: #dc3545;
+  }
+
+  .btn-danger:hover { background: #bb2d3b; }
+
+  /* Error messages */
+  .error-msg {
+    background: #f8d7da;
+    color: #842029;
+    border: 1px solid #f5c2c7;
+    border-radius: 4px;
+    padding: 8px;
+    font-size: 12px;
+    display: none;
+  }
+
+  .error-msg.visible { display: block; }
+
+  /* Progress */
+  .progress-msg {
+    font-size: 12px;
+    color: #666;
+    font-style: italic;
+    display: none;
+  }
+
+  .progress-msg.visible { display: block; }
+
+  /* --- Map --- */
+  #map-container {
+    flex: 1;
+    height: 100vh;
+    position: relative;
+  }
+
+  #map {
+    width: 100%;
+    height: 100%;
+  }
+
+  /* Missing tile layer style hint (dashed border done via GeoJSON) */
+
+  /* Route markers info */
+  .marker-info {
+    font-size: 12px;
+    color: #555;
+    margin-bottom: 4px;
+  }
+
+  .marker-info .coord {
+    font-family: 'SF Mono', Monaco, Consolas, monospace;
+    font-size: 11px;
+    color: #333;
+  }
+
+  .marker-info .start-label { color: #28a745; font-weight: 600; }
+  .marker-info .end-label { color: #dc3545; font-weight: 600; }
+
+  /* Route summary */
+  .route-summary {
+    font-size: 13px;
+    color: #333;
+    margin-top: 4px;
+  }
+
+  .route-summary .alt-info {
+    font-size: 12px;
+    color: #666;
+    margin-top: 2px;
+  }
+
+  /* Instruction text */
+  .instruction {
+    font-size: 12px;
+    color: #888;
+    font-style: italic;
+  }
+
+  /* Collapsible tile level sections */
+  .level-section {
+    margin-top: 8px;
+    border: 1px solid #eee;
+    border-radius: 4px;
+    overflow: hidden;
+  }
+
+  .level-header {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 6px 8px;
+    background: #fafafa;
+    cursor: pointer;
+    font-size: 13px;
+    user-select: none;
+  }
+
+  .level-header:hover { background: #f0f0f0; }
+
+  .level-header .toggle-arrow {
+    font-size: 10px;
+    transition: transform 0.15s;
+    color: #888;
+  }
+
+  .level-header .toggle-arrow.open {
+    transform: rotate(90deg);
+  }
+
+  .level-tiles {
+    display: none;
+    max-height: 200px;
+    overflow-y: auto;
+    border-top: 1px solid #eee;
+  }
+
+  .level-tiles.open {
+    display: block;
+  }
+
+  .level-tiles .tile-item {
+    padding: 3px 8px;
+    border-bottom: 1px solid #f0f0f0;
+    display: flex;
+    justify-content: space-between;
+    font-size: 12px;
+    font-family: 'SF Mono', Monaco, Consolas, monospace;
+  }
+
+  .level-tiles .tile-item.missing {
+    color: #999;
+    text-decoration: line-through;
+  }
+
+  /* Bbox drawing mode: crosshair cursor on the map */
+  #map.bbox-draw-mode {
+    cursor: crosshair;
+  }
+
+  /* Polygon drawing mode: crosshair cursor on the map */
+  #map.polygon-draw-mode {
+    cursor: crosshair;
+  }
+
+  /* Mode-specific panels */
+  .mode-panel {
+    display: none;
+  }
+
+  .mode-panel.active {
+    display: block;
+  }
+
+  /* Bbox info styling */
+  .bbox-info {
+    font-size: 12px;
+    color: #555;
+    margin-top: 4px;
+    line-height: 1.5;
+  }
+
+  .bbox-info .coord {
+    font-family: 'SF Mono', Monaco, Consolas, monospace;
+    font-size: 11px;
+    color: #333;
+  }
+
+  /* Country search / dropdown */
+  .country-search-input {
+    width: 100%;
+    padding: 6px 8px;
+    font-size: 13px;
+    border: 1px solid #ccc;
+    border-radius: 4px;
+    outline: none;
+    margin-bottom: 4px;
+  }
+
+  .country-search-input:focus {
+    border-color: #0d6efd;
+    box-shadow: 0 0 0 2px rgba(13, 110, 253, 0.15);
+  }
+
+  .country-list {
+    max-height: 220px;
+    overflow-y: auto;
+    border: 1px solid #dee2e6;
+    border-radius: 4px;
+    background: #fff;
+  }
+
+  .country-item {
+    padding: 5px 8px;
+    font-size: 12px;
+    cursor: pointer;
+    border-bottom: 1px solid #f0f0f0;
+    transition: background 0.1s;
+  }
+
+  .country-item:last-child { border-bottom: none; }
+
+  .country-item:hover {
+    background: #e9ecef;
+  }
+
+  .country-item.selected {
+    background: #0d6efd;
+    color: #fff;
+  }
+
+  .country-selected-info {
+    font-size: 12px;
+    color: #333;
+    margin-top: 6px;
+    padding: 6px 8px;
+    background: #e8f4fd;
+    border: 1px solid #b6d4fe;
+    border-radius: 4px;
+  }
+
+  .country-selected-info .country-name {
+    font-weight: 600;
+    color: #0d6efd;
+  }
+
+  .country-warning {
+    font-size: 11px;
+    color: #856404;
+    background: #fff3cd;
+    border: 1px solid #ffc107;
+    border-radius: 4px;
+    padding: 6px 8px;
+    margin-top: 6px;
+  }
+
+  .country-cors-note {
+    font-size: 11px;
+    color: #842029;
+    background: #f8d7da;
+    border: 1px solid #f5c2c7;
+    border-radius: 4px;
+    padding: 6px 8px;
+    margin-top: 6px;
+  }
+
+  /* Cache simulation controls */
+  .cache-toggle {
+    display: flex;
+    gap: 2px;
+    background: #e9ecef;
+    border-radius: 4px;
+    padding: 2px;
+  }
+
+  .cache-toggle label {
+    font-size: 12px;
+    padding: 3px 10px;
+    border-radius: 3px;
+    cursor: pointer;
+    background: transparent;
+    transition: background 0.15s, color 0.15s;
+    text-align: center;
+    flex: 1;
+  }
+
+  .cache-toggle input[type="radio"] {
+    display: none;
+  }
+
+  .cache-toggle input[type="radio"]:checked + label {
+    background: #fff;
+    font-weight: 600;
+    box-shadow: 0 1px 2px rgba(0,0,0,0.1);
+  }
+
+  /* Budget bar */
+  .budget-bar-container {
+    margin-top: 6px;
+    display: none;
+  }
+
+  .budget-bar-container.visible {
+    display: block;
+  }
+
+  .budget-bar-label {
+    font-size: 12px;
+    color: #555;
+    margin-bottom: 3px;
+  }
+
+  .budget-bar {
+    height: 8px;
+    background: #e9ecef;
+    border-radius: 4px;
+    overflow: hidden;
+  }
+
+  .budget-bar-fill {
+    height: 100%;
+    background: #0d6efd;
+    border-radius: 4px;
+    transition: width 0.3s, background 0.3s;
+  }
+
+  .budget-bar-fill.warning {
+    background: #ffc107;
+  }
+
+  .budget-bar-fill.danger {
+    background: #dc3545;
+  }
+
+  /* Distance limit slider (route mode) */
+  .distance-limit-row {
+    display: none;
+    margin-top: 6px;
+  }
+
+  .distance-limit-row.visible {
+    display: block;
+  }
+
+  .distance-limit-row .setting-row {
+    margin-bottom: 2px;
+  }
+
+  .distance-limit-info {
+    font-size: 11px;
+    color: #888;
+    margin-top: 2px;
+  }
+
+  /* Eviction notice */
+  .eviction-notice {
+    font-size: 11px;
+    color: #856404;
+    background: #fff3cd;
+    border: 1px solid #ffc107;
+    border-radius: 4px;
+    padding: 4px 8px;
+    margin-top: 4px;
+    display: none;
+  }
+
+  .eviction-notice.visible {
+    display: block;
+  }
+</style>
+</head>
+<body>
+
+<div id="sidebar">
+  <h1>Valhalla Tile Size Visualizer</h1>
+
+  <!-- Mode selector -->
+  <div class="section">
+    <div class="section-title">Selection Mode</div>
+    <div class="mode-tabs">
+      <input type="radio" name="mode" id="mode-route" value="route" checked>
+      <label for="mode-route">Route</label>
+      <input type="radio" name="mode" id="mode-bbox" value="bbox">
+      <label for="mode-bbox">Bbox</label>
+      <input type="radio" name="mode" id="mode-radius" value="radius">
+      <label for="mode-radius">Radius</label>
+      <input type="radio" name="mode" id="mode-polygon" value="polygon">
+      <label for="mode-polygon">Polygon</label>
+      <input type="radio" name="mode" id="mode-country" value="country">
+      <label for="mode-country">Country</label>
+    </div>
+  </div>
+
+  <!-- Settings -->
+  <div class="section">
+    <div class="section-title">Settings</div>
+    <div class="setting-row">
+      <span>Valhalla URL</span>
+      <input type="text" id="valhalla-url" value="http://localhost:8002">
+    </div>
+    <div style="margin-top:8px; border-top:1px solid #eee; padding-top:8px;">
+      <div style="font-size:12px; color:#555; margin-bottom:4px; font-weight:600;">Include Levels</div>
+      <div style="display:flex; gap:12px; font-size:12px;">
+        <label style="display:flex; align-items:center; gap:4px; cursor:pointer;">
+          <input type="checkbox" id="opt-level-0" checked>
+          <span class="level-dot l0" style="display:inline-block;"></span> 0 (highway)
+        </label>
+        <label style="display:flex; align-items:center; gap:4px; cursor:pointer;">
+          <input type="checkbox" id="opt-level-1" checked>
+          <span class="level-dot l1" style="display:inline-block;"></span> 1 (arterial)
+        </label>
+        <label style="display:flex; align-items:center; gap:4px; cursor:pointer;">
+          <input type="checkbox" id="opt-level-2" checked>
+          <span class="level-dot l2" style="display:inline-block;"></span> 2 (local)
+        </label>
+      </div>
+    </div>
+    <div style="margin-top:8px; border-top:1px solid #eee; padding-top:8px;">
+      <div style="font-size:12px; color:#555; margin-bottom:4px; font-weight:600;">Compression</div>
+      <div style="display:flex; gap:12px; font-size:12px;">
+        <label style="display:flex; align-items:center; gap:4px; cursor:pointer;">
+          <input type="radio" name="encoding" id="enc-identity" value="identity">
+          <span>identity (raw)</span>
+        </label>
+        <label style="display:flex; align-items:center; gap:4px; cursor:pointer;">
+          <input type="radio" name="encoding" id="enc-gzip" value="gzip">
+          <span>gzip</span>
+        </label>
+        <label style="display:flex; align-items:center; gap:4px; cursor:pointer;">
+          <input type="radio" name="encoding" id="enc-zstd" value="zstd" checked>
+          <span>zstd</span>
+        </label>
+      </div>
+    </div>
+  </div>
+
+  <!-- Cache Simulation -->
+  <div class="section">
+    <div class="section-title">Cache Mode</div>
+    <div class="setting-row">
+      <span>Selection</span>
+      <div class="cache-toggle">
+        <input type="radio" name="cache-mode" id="cache-replace" value="replace" checked>
+        <label for="cache-replace">Replace</label>
+        <input type="radio" name="cache-mode" id="cache-additive" value="additive">
+        <label for="cache-additive">Additive</label>
+      </div>
+    </div>
+    <div class="setting-row" style="margin-top:6px;">
+      <span>Budget (MB)</span>
+      <input type="number" id="cache-budget" value="0" min="0" step="10" style="width:80px;" title="0 = unlimited">
+    </div>
+    <div class="budget-bar-container" id="budget-bar-container">
+      <div class="budget-bar-label" id="budget-bar-label">0 / 0 MB used</div>
+      <div class="budget-bar">
+        <div class="budget-bar-fill" id="budget-bar-fill" style="width:0%"></div>
+      </div>
+    </div>
+    <div class="eviction-notice" id="eviction-notice"></div>
+  </div>
+
+  <!-- Route waypoints (route mode panel) -->
+  <div class="section mode-panel active" id="waypoints-section" data-mode="route">
+    <div class="section-title">Waypoints</div>
+    <div id="waypoints-info">
+      <div class="instruction">Right-click on map to set start point</div>
+    </div>
+  </div>
+
+  <!-- Route settings (route mode panel) -->
+  <div class="section mode-panel active" id="route-settings-section" data-mode="route">
+    <div class="section-title">Route Settings</div>
+    <div class="setting-row">
+      <span>Alternatives</span>
+      <input type="checkbox" id="opt-alternatives">
+    </div>
+    <div class="distance-limit-row visible" id="distance-limit-row">
+      <div class="setting-row">
+        <span>Distance limit</span>
+        <span style="display:flex; align-items:center; gap:6px;">
+          <input type="range" id="distance-limit-slider" min="0" max="500" value="0" style="width:100px;">
+          <span id="distance-limit-value" style="font-family:monospace; font-size:12px; min-width:56px;">off</span>
+        </span>
+      </div>
+      <div class="distance-limit-info" id="distance-limit-info"></div>
+    </div>
+  </div>
+
+  <!-- Bbox mode panel -->
+  <div class="section mode-panel" id="bbox-section" data-mode="bbox">
+    <div class="section-title">Bounding Box</div>
+    <div id="bbox-info">
+      <div class="instruction">Right-click and drag on the map to draw a rectangle</div>
+    </div>
+  </div>
+
+  <!-- Radius mode panel -->
+  <div class="section mode-panel" id="radius-section" data-mode="radius">
+    <div class="section-title">Point + Radius</div>
+    <div id="radius-info">
+      <div class="instruction">Right-click on map to place center point</div>
+    </div>
+    <div class="setting-row" style="margin-top:8px;">
+      <span>Radius</span>
+      <span style="display:flex; align-items:center; gap:6px;">
+        <input type="range" id="radius-slider" min="1" max="100" value="10" style="width:100px;">
+        <span id="radius-value" style="font-family:monospace; font-size:12px; min-width:42px;">10 km</span>
+      </span>
+    </div>
+  </div>
+
+  <!-- Polygon mode panel -->
+  <div class="section mode-panel" id="polygon-section" data-mode="polygon">
+    <div class="section-title">Freehand Polygon</div>
+    <div id="polygon-info">
+      <div class="instruction">Right-click to add vertices. Double-right-click or click "Close" to finish.</div>
+    </div>
+    <div style="margin-top:8px; display:flex; gap:6px;">
+      <button class="btn" id="btn-polygon-undo">Undo</button>
+      <button class="btn" id="btn-polygon-close">Close polygon</button>
+    </div>
+  </div>
+
+  <!-- Country mode panel -->
+  <div class="section mode-panel" id="country-section" data-mode="country">
+    <div class="section-title">Country / Region</div>
+    <input type="text" class="country-search-input" id="country-search" placeholder="Search countries..." autocomplete="off">
+    <div class="country-list" id="country-list"></div>
+    <div id="country-selected-info"></div>
+  </div>
+
+  <!-- Route info (shown dynamically when route is computed, hidden when not in route mode) -->
+  <div class="section" id="route-info-section" style="display:none;">
+    <div class="section-title">Route</div>
+    <div class="route-summary" id="route-summary"></div>
+  </div>
+
+  <!-- Actions -->
+  <div style="display:flex; gap:8px;">
+    <button class="btn btn-danger" id="btn-clear">Clear</button>
+    <button class="btn" id="btn-copy-json">Copy as JSON</button>
+  </div>
+
+  <!-- Error area -->
+  <div class="error-msg" id="error-msg"></div>
+
+  <!-- Progress area -->
+  <div class="progress-msg" id="progress-msg"></div>
+
+  <!-- Results -->
+  <div class="section" id="results-section" style="display:none;">
+    <div class="section-title">Results</div>
+    <div class="results-summary" id="results-summary"></div>
+  </div>
+
+  <!-- Tile list -->
+  <div class="section" id="tilelist-section" style="display:none;">
+    <div class="section-title">Tile List</div>
+    <div class="tile-list" id="tile-list"></div>
+  </div>
+</div>
+
+<div id="map-container">
+  <div id="map"></div>
+</div>
+
+<script>
+// ===========================================================================
+// Valhalla Tile Sizer — core utilities and map initialization
+// ===========================================================================
+
+// ---------------------------------------------------------------------------
+// Tile math constants
+// ---------------------------------------------------------------------------
+const TILE_LEVELS = [
+  { level: 0, size: 4.0,   cols: 90,   label: 'highway',  color: '#d62728', fillOpacity: 0.05 },
+  { level: 1, size: 1.0,   cols: 360,  label: 'arterial', color: '#ff7f0e', fillOpacity: 0.08 },
+  { level: 2, size: 0.25,  cols: 1440, label: 'local',    color: '#2ca02c', fillOpacity: 0.15 },
+];
+
+const MISSING_STYLE = { color: '#999999', fillOpacity: 0.03 };
+const EARTH_RADIUS_KM = 6371.0;
+
+// ---------------------------------------------------------------------------
+// Tile math functions
+// ---------------------------------------------------------------------------
+
+/**
+ * Convert a (lat, lon) pair to a tile ID at the given level index (0, 1, 2).
+ */
+function latLonToTileId(lat, lon, levelIndex) {
+  const lvl = TILE_LEVELS[levelIndex];
+  const row = Math.floor((lat + 90) / lvl.size);
+  const col = Math.floor((lon + 180) / lvl.size);
+  return row * lvl.cols + col;
+}
+
+/**
+ * Convert a tile ID back to its bounding box [south, west, north, east].
+ */
+function tileIdToBbox(tileId, levelIndex) {
+  const lvl = TILE_LEVELS[levelIndex];
+  const row = Math.floor(tileId / lvl.cols);
+  const col = tileId % lvl.cols;
+  const south = row * lvl.size - 90;
+  const west  = col * lvl.size - 180;
+  const north = south + lvl.size;
+  const east  = west + lvl.size;
+  return { south, west, north, east };
+}
+
+/**
+ * Convert a tile ID + level to its file path on the tile server.
+ */
+function tileIdToPath(tileId, level) {
+  const dir = String(Math.floor(tileId / 1000)).padStart(3, '0');
+  const file = String(tileId % 1000).padStart(3, '0');
+  return `${level}/${dir}/${file}.gph`;
+}
+
+/**
+ * Collect all tile IDs at all levels that contain the given (lat, lon).
+ * Returns an array of { level, tileId, path }.
+ */
+function tilesForPoint(lat, lon) {
+  const result = [];
+  for (let li = 0; li < TILE_LEVELS.length; li++) {
+    const tileId = latLonToTileId(lat, lon, li);
+    result.push({
+      level: li,
+      tileId,
+      path: tileIdToPath(tileId, TILE_LEVELS[li].level),
+    });
+  }
+  return result;
+}
+
+/**
+ * Check whether a given level index (0, 1, 2) is enabled via the sidebar checkboxes.
+ */
+function isLevelEnabled(levelIndex) {
+  const el = document.getElementById(`opt-level-${levelIndex}`);
+  return el ? el.checked : true;
+}
+
+/**
+ * Return an array of enabled level indices.
+ */
+function getEnabledLevels() {
+  return [0, 1, 2].filter(isLevelEnabled);
+}
+
+/**
+ * Convert a tile bbox to a GeoJSON Polygon coordinate ring (for map display).
+ * GeoJSON uses [lon, lat] order.
+ */
+function bboxToGeoJSONCoords(bbox) {
+  return [[
+    [bbox.west, bbox.south],
+    [bbox.east, bbox.south],
+    [bbox.east, bbox.north],
+    [bbox.west, bbox.north],
+    [bbox.west, bbox.south],
+  ]];
+}
+
+// ---------------------------------------------------------------------------
+// Polyline6 decode
+// ---------------------------------------------------------------------------
+
+/**
+ * Decode a Google-encoded polyline string with precision 6.
+ * Returns an array of [lat, lon] pairs.
+ */
+function decodePolyline6(encoded) {
+  const points = [];
+  let index = 0;
+  let lat = 0;
+  let lon = 0;
+  const len = encoded.length;
+
+  while (index < len) {
+    // Decode latitude
+    let shift = 0;
+    let result = 0;
+    let byte;
+    do {
+      byte = encoded.charCodeAt(index++) - 63;
+      result |= (byte & 0x1f) << shift;
+      shift += 5;
+    } while (byte >= 0x20);
+    lat += (result & 1) ? ~(result >> 1) : (result >> 1);
+
+    // Decode longitude
+    shift = 0;
+    result = 0;
+    do {
+      byte = encoded.charCodeAt(index++) - 63;
+      result |= (byte & 0x1f) << shift;
+      shift += 5;
+    } while (byte >= 0x20);
+    lon += (result & 1) ? ~(result >> 1) : (result >> 1);
+
+    points.push([lat / 1e6, lon / 1e6]);
+  }
+
+  return points;
+}
+
+// ---------------------------------------------------------------------------
+// Equirectangular distance
+// ---------------------------------------------------------------------------
+
+/**
+ * Compute the distance between two (lat, lon) points using the equirectangular
+ * approximation. Returns distance in kilometers.
+ * dx = (lon2-lon1) * cos(mid_lat), dy = lat2-lat1, dist = R * sqrt(dx^2 + dy^2)
+ */
+function equirectangularDistance(lat1, lon1, lat2, lon2) {
+  const toRad = Math.PI / 180;
+  const midLat = (lat1 + lat2) / 2 * toRad;
+  const dx = (lon2 - lon1) * toRad * Math.cos(midLat);
+  const dy = (lat2 - lat1) * toRad;
+  return EARTH_RADIUS_KM * Math.sqrt(dx * dx + dy * dy);
+}
+
+/**
+ * Compute the total length of a polyline (array of [lat, lon] pairs) in km.
+ */
+function polylineLength(points) {
+  let total = 0;
+  for (let i = 1; i < points.length; i++) {
+    total += equirectangularDistance(
+      points[i - 1][0], points[i - 1][1],
+      points[i][0], points[i][1]
+    );
+  }
+  return total;
+}
+
+// ---------------------------------------------------------------------------
+// File size formatting
+// ---------------------------------------------------------------------------
+function formatBytes(bytes) {
+  if (bytes === 0) return '0 B';
+  if (bytes < 1024) return bytes + ' B';
+  if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB';
+  if (bytes < 1024 * 1024 * 1024) return (bytes / (1024 * 1024)).toFixed(1) + ' MB';
+  return (bytes / (1024 * 1024 * 1024)).toFixed(2) + ' GB';
+}
+
+// ---------------------------------------------------------------------------
+// URL hash state persistence for map position
+// ---------------------------------------------------------------------------
+function getHashParams() {
+  const hash = window.location.hash.replace('#', '');
+  if (!hash.startsWith('map=')) return null;
+  const parts = hash.slice(4).split('/');
+  if (parts.length !== 3) return null;
+  const zoom = parseFloat(parts[0]);
+  const lat = parseFloat(parts[1]);
+  const lng = parseFloat(parts[2]);
+  if (isNaN(zoom) || isNaN(lat) || isNaN(lng)) return null;
+  return { zoom, center: [lng, lat] };
+}
+
+function setHashParams(map) {
+  const center = map.getCenter();
+  const zoom = map.getZoom().toFixed(2);
+  const lat = center.lat.toFixed(5);
+  const lng = center.lng.toFixed(5);
+  window.location.hash = `map=${zoom}/${lat}/${lng}`;
+}
+
+// ---------------------------------------------------------------------------
+// Map initialization
+// ---------------------------------------------------------------------------
+const hashState = getHashParams();
+const defaultCenter = [13.0, 55.6]; // Southern Sweden (lon, lat for MapLibre)
+const defaultZoom = 10;
+
+const map = new maplibregl.Map({
+  container: 'map',
+  style: 'https://tiles.openfreemap.org/styles/bright',
+  center: hashState ? hashState.center : defaultCenter,
+  zoom: hashState ? hashState.zoom : defaultZoom,
+  attributionControl: true,
+});
+
+// Update hash on map move
+map.on('moveend', () => setHashParams(map));
+
+// Set initial hash if not present
+if (!hashState) {
+  map.once('load', () => setHashParams(map));
+}
+
+// ---------------------------------------------------------------------------
+// UI references
+// ---------------------------------------------------------------------------
+const elError = document.getElementById('error-msg');
+const elProgress = document.getElementById('progress-msg');
+const elResultsSection = document.getElementById('results-section');
+const elResultsSummary = document.getElementById('results-summary');
+const elTileListSection = document.getElementById('tilelist-section');
+const elTileList = document.getElementById('tile-list');
+const elWaypointsInfo = document.getElementById('waypoints-info');
+const elWaypointsSection = document.getElementById('waypoints-section');
+const elRouteInfoSection = document.getElementById('route-info-section');
+const elRouteSummary = document.getElementById('route-summary');
+
+const elBboxSection = document.getElementById('bbox-section');
+const elBboxInfo = document.getElementById('bbox-info');
+const elCountrySearch = document.getElementById('country-search');
+const elCountryList = document.getElementById('country-list');
+const elCountrySelectedInfo = document.getElementById('country-selected-info');
+
+// Cache simulation UI refs
+const elBudgetBarContainer = document.getElementById('budget-bar-container');
+const elBudgetBarLabel = document.getElementById('budget-bar-label');
+const elBudgetBarFill = document.getElementById('budget-bar-fill');
+const elEvictionNotice = document.getElementById('eviction-notice');
+const elDistanceLimitSlider = document.getElementById('distance-limit-slider');
+const elDistanceLimitValue = document.getElementById('distance-limit-value');
+const elDistanceLimitInfo = document.getElementById('distance-limit-info');
+
+function showError(msg) {
+  elError.textContent = msg;
+  elError.classList.add('visible');
+}
+
+function hideError() {
+  elError.classList.remove('visible');
+}
+
+function showProgress(msg) {
+  elProgress.textContent = msg;
+  elProgress.classList.add('visible');
+}
+
+function hideProgress() {
+  elProgress.classList.remove('visible');
+}
+
+// ---------------------------------------------------------------------------
+// Compression / last selection state
+// ---------------------------------------------------------------------------
+let currentEncoding = 'zstd';
+let lastSelection = { uniqueTiles: null, tileSets: null };
+
+// ---------------------------------------------------------------------------
+// Route mode state
+// ---------------------------------------------------------------------------
+let startMarker = null;   // maplibregl.Marker
+let endMarker = null;     // maplibregl.Marker
+let startLatLon = null;   // { lat, lon }
+let endLatLon = null;     // { lat, lon }
+let routeData = null;     // { main: [[lat,lon],...], alternatives: [[[lat,lon],...], ...] }
+
+// ---------------------------------------------------------------------------
+// Bbox mode state
+// ---------------------------------------------------------------------------
+let bboxDrawing = false;      // true while mouse is down and dragging
+let bboxStartPoint = null;    // { x, y } screen coords of mousedown
+let bboxStartLatLon = null;   // { lat, lon } of mousedown
+let bboxEndLatLon = null;     // { lat, lon } of mouseup (finalized bbox)
+let bboxRect = null;          // { south, west, north, east } finalized bbox
+
+// ---------------------------------------------------------------------------
+// Radius mode state
+// ---------------------------------------------------------------------------
+let radiusCenterLatLon = null;  // { lat, lon } center of circle
+let radiusCenterMarker = null;  // maplibregl.Marker
+let radiusCirclePoly = null;    // GeoJSON Feature (turf circle result)
+
+// ---------------------------------------------------------------------------
+// Polygon mode state
+// ---------------------------------------------------------------------------
+let polygonVertices = [];          // array of { lat, lon }
+let polygonMarkers = [];           // array of maplibregl.Marker (vertex dots)
+let polygonClosed = false;         // true after double-click closes the polygon
+let polygonDrawingLineInitialized = false; // true once the preview line source is added
+
+// ---------------------------------------------------------------------------
+// Cache simulation state
+// ---------------------------------------------------------------------------
+
+/**
+ * Accumulated tile cache: Map of path -> { level, tileId, path, size, missing, insertionOrder }
+ * Tiles are tracked in insertion order for FIFO eviction.
+ * Only used in additive mode; in replace mode we just use the latest result.
+ */
+let cacheAccumulator = new Map();  // path -> tile info
+let cacheInsertionCounter = 0;     // monotonic counter for FIFO ordering
+
+/**
+ * Get the current cache mode: 'replace' or 'additive'.
+ */
+function getCacheMode() {
+  const checked = document.querySelector('input[name="cache-mode"]:checked');
+  return checked ? checked.value : 'replace';
+}
+
+/**
+ * Get the budget in bytes. 0 = unlimited.
+ */
+function getCacheBudgetBytes() {
+  const mb = parseFloat(document.getElementById('cache-budget').value) || 0;
+  return mb * 1024 * 1024;
+}
+
+/**
+ * Get the distance limit in km. 0 = unlimited.
+ */
+function getDistanceLimitKm() {
+  return parseInt(elDistanceLimitSlider.value, 10) || 0;
+}
+
+/**
+ * Merge new tiles into the cache accumulator.
+ * Returns the merged levelTiles Map after FIFO eviction if budget is set.
+ * @param {Map<number, Array<{tileId, path, size, missing}>>} newLevelTiles
+ * @returns {Map<number, Array>} merged levelTiles after eviction
+ */
+function mergeTilesIntoCache(newLevelTiles) {
+  // Add new tiles to accumulator (skip tiles already present)
+  for (let li = 0; li < TILE_LEVELS.length; li++) {
+    const tiles = newLevelTiles.get(li) || [];
+    for (const tile of tiles) {
+      if (!cacheAccumulator.has(tile.path)) {
+        cacheAccumulator.set(tile.path, {
+          ...tile,
+          level: li,
+          insertionOrder: cacheInsertionCounter++,
+        });
+      }
+    }
+  }
+
+  // Apply FIFO eviction if budget is set
+  const budgetBytes = getCacheBudgetBytes();
+  let evictedCount = 0;
+  if (budgetBytes > 0) {
+    // Sort by insertion order (oldest first)
+    const allEntries = [...cacheAccumulator.values()]
+      .filter(t => !t.missing)
+      .sort((a, b) => a.insertionOrder - b.insertionOrder);
+
+    let totalSize = allEntries.reduce((sum, t) => sum + (t.size || 0), 0);
+
+    // Evict oldest tiles until within budget
+    while (totalSize > budgetBytes && allEntries.length > 0) {
+      const oldest = allEntries.shift();
+      cacheAccumulator.delete(oldest.path);
+      totalSize -= (oldest.size || 0);
+      evictedCount++;
+    }
+  }
+
+  // Show eviction notice
+  if (evictedCount > 0) {
+    elEvictionNotice.textContent = `Evicted ${evictedCount} oldest tile${evictedCount > 1 ? 's' : ''} to fit within budget.`;
+    elEvictionNotice.classList.add('visible');
+  } else {
+    elEvictionNotice.classList.remove('visible');
+  }
+
+  // Rebuild levelTiles from accumulator
+  const mergedLevelTiles = new Map();
+  for (let li = 0; li < TILE_LEVELS.length; li++) {
+    mergedLevelTiles.set(li, []);
+  }
+  for (const tile of cacheAccumulator.values()) {
+    const li = tile.level;
+    mergedLevelTiles.get(li).push({
+      tileId: tile.tileId,
+      path: tile.path,
+      size: tile.size,
+      missing: tile.missing,
+    });
+  }
+  // Sort each level by path
+  for (let li = 0; li < TILE_LEVELS.length; li++) {
+    mergedLevelTiles.get(li).sort((a, b) => a.path.localeCompare(b.path));
+  }
+
+  return mergedLevelTiles;
+}
+
+/**
+ * Update the budget bar display based on the current tile data.
+ */
+function updateBudgetBar() {
+  const budgetBytes = getCacheBudgetBytes();
+  if (budgetBytes <= 0) {
+    elBudgetBarContainer.classList.remove('visible');
+    return;
+  }
+
+  // Compute current total from lastTileData (or cache accumulator in additive mode)
+  let totalSize = 0;
+  const source = getCacheMode() === 'additive' ? cacheAccumulator : null;
+  if (source) {
+    for (const tile of source.values()) {
+      if (!tile.missing) totalSize += (tile.size || 0);
+    }
+  } else if (lastTileData) {
+    for (let li = 0; li < TILE_LEVELS.length; li++) {
+      const tiles = lastTileData.get(li) || [];
+      for (const t of tiles) {
+        if (!t.missing) totalSize += (t.size || 0);
+      }
+    }
+  }
+
+  const budgetMB = (budgetBytes / (1024 * 1024)).toFixed(0);
+  const usedMB = (totalSize / (1024 * 1024)).toFixed(1);
+  const pct = Math.min(100, (totalSize / budgetBytes) * 100);
+
+  elBudgetBarLabel.textContent = `${usedMB} / ${budgetMB} MB used`;
+  elBudgetBarFill.style.width = `${pct}%`;
+
+  // Color based on usage
+  elBudgetBarFill.classList.remove('warning', 'danger');
+  if (pct >= 90) {
+    elBudgetBarFill.classList.add('danger');
+  } else if (pct >= 70) {
+    elBudgetBarFill.classList.add('warning');
+  }
+
+  elBudgetBarContainer.classList.add('visible');
+}
+
+/**
+ * Apply cache mode logic to a new set of levelTiles:
+ * - In replace mode: clear accumulator, return tiles as-is
+ * - In additive mode: merge into accumulator, apply FIFO eviction, return merged
+ * Also updates budget bar.
+ */
+function applyCacheMode(levelTiles) {
+  const mode = getCacheMode();
+  let result;
+
+  if (mode === 'additive') {
+    result = mergeTilesIntoCache(levelTiles);
+  } else {
+    // Replace mode: clear accumulator, just use new tiles
+    cacheAccumulator.clear();
+    cacheInsertionCounter = 0;
+    // Also populate accumulator with the new tiles for budget bar
+    for (let li = 0; li < TILE_LEVELS.length; li++) {
+      const tiles = levelTiles.get(li) || [];
+      for (const tile of tiles) {
+        cacheAccumulator.set(tile.path, {
+          ...tile,
+          level: li,
+          insertionOrder: cacheInsertionCounter++,
+        });
+      }
+    }
+    result = levelTiles;
+    elEvictionNotice.classList.remove('visible');
+  }
+
+  lastTileData = result;
+  updateBudgetBar();
+  return result;
+}
+
+/**
+ * Clear only the selection UI state (markers, polygon, bbox etc.) without
+ * clearing accumulated tiles. Used when switching modes in additive mode.
+ */
+function clearSelection() {
+  hideError();
+  hideProgress();
+
+  // Remove markers
+  if (startMarker) { startMarker.remove(); startMarker = null; }
+  if (endMarker) { endMarker.remove(); endMarker = null; }
+  startLatLon = null;
+  endLatLon = null;
+  routeData = null;
+
+  // Clear bbox state
+  bboxDrawing = false;
+  bboxStartPoint = null;
+  bboxStartLatLon = null;
+  bboxEndLatLon = null;
+  bboxRect = null;
+
+  // Clear radius state
+  if (radiusCenterMarker) { radiusCenterMarker.remove(); radiusCenterMarker = null; }
+  radiusCenterLatLon = null;
+  radiusCirclePoly = null;
+
+  // Clear polygon state
+  for (const m of polygonMarkers) { m.remove(); }
+  polygonMarkers = [];
+  polygonVertices = [];
+  polygonClosed = false;
+  clearPolygonDrawingLine();
+
+  // Clear country state
+  countrySelectedEntry = null;
+  countryPolygonGeoJSON = null;
+  if (elCountrySelectedInfo) elCountrySelectedInfo.innerHTML = '';
+  if (elCountrySearch) elCountrySearch.value = '';
+  if (elCountryList) elCountryList.innerHTML = '';
+
+  // Clear route lines and selection polygon (but NOT tile bboxes)
+  clearRouteFromMap();
+  clearSelectionPolygonFromMap();
+  clearDistanceLimitLayers();
+
+  // Reset sidebar UI for mode-specific panels
+  updateWaypointsUI();
+  updateBboxUI();
+  updateRadiusUI();
+  updatePolygonUI();
+  elRouteInfoSection.style.display = 'none';
+  elRouteSummary.innerHTML = '';
+}
+
+/**
+ * Get the currently selected mode.
+ */
+function getSelectedMode() {
+  const checked = document.querySelector('input[name="mode"]:checked');
+  return checked ? checked.value : 'route';
+}
+
+// ---------------------------------------------------------------------------
+// Mode switching logic
+// ---------------------------------------------------------------------------
+
+/**
+ * Switch to a new mode: show/hide mode-specific panels,
+ * clear previous selection, update map cursor.
+ */
+function switchMode(newMode) {
+  // Show/hide mode-specific panels
+  document.querySelectorAll('.mode-panel').forEach(panel => {
+    const panelMode = panel.getAttribute('data-mode');
+    if (panelMode === newMode) {
+      panel.classList.add('active');
+    } else {
+      panel.classList.remove('active');
+      // Also hide panels that were shown dynamically (like route-info)
+      if (panel.style.display === 'block' && panelMode !== newMode) {
+        panel.style.display = 'none';
+      }
+    }
+  });
+
+  const mapEl = document.getElementById('map');
+
+  if (newMode === 'bbox') {
+    mapEl.classList.add('bbox-draw-mode');
+  } else {
+    mapEl.classList.remove('bbox-draw-mode');
+  }
+
+  if (newMode === 'polygon') {
+    mapEl.classList.add('polygon-draw-mode');
+  } else {
+    mapEl.classList.remove('polygon-draw-mode');
+  }
+
+  // In additive mode, only clear the selection UI (keep accumulated tiles).
+  // In replace mode, clear everything.
+  if (getCacheMode() === 'additive') {
+    clearSelection();
+  } else {
+    clearAll();
+  }
+
+  // Populate country list when switching to country mode
+  if (newMode === 'country') {
+    renderCountryList('');
+  }
+}
+
+// Listen for mode changes
+document.querySelectorAll('input[name="mode"]').forEach(radio => {
+  radio.addEventListener('change', (e) => {
+    switchMode(e.target.value);
+  });
+});
+
+/**
+ * Format a lat/lon pair for display.
+ */
+function formatCoord(lat, lon) {
+  return `${lat.toFixed(5)}, ${lon.toFixed(5)}`;
+}
+
+/**
+ * Update waypoints info in sidebar.
+ */
+function updateWaypointsUI() {
+  if (!startLatLon && !endLatLon) {
+    elWaypointsInfo.innerHTML = '<div class="instruction">Right-click on map to set start point</div>';
+    return;
+  }
+
+  let html = '';
+  if (startLatLon) {
+    html += `<div class="marker-info"><span class="start-label">Start:</span> <span class="coord">${formatCoord(startLatLon.lat, startLatLon.lon)}</span></div>`;
+  }
+  if (endLatLon) {
+    html += `<div class="marker-info"><span class="end-label">End:</span> <span class="coord">${formatCoord(endLatLon.lat, endLatLon.lon)}</span></div>`;
+  } else if (startLatLon) {
+    html += '<div class="instruction">Right-click on map to set end point</div>';
+  }
+  elWaypointsInfo.innerHTML = html;
+}
+
+/**
+ * Update route info summary in sidebar.
+ */
+function updateRouteSummaryUI(mainTrip, alternateTrips) {
+  const summary = mainTrip.summary || {};
+  const distKm = (summary.length || 0).toFixed(1);
+  const timeSec = summary.time || 0;
+  const timeMin = Math.round(timeSec / 60);
+  const timeStr = timeMin >= 60
+    ? `${Math.floor(timeMin / 60)}h ${timeMin % 60}m`
+    : `${timeMin}m`;
+
+  let html = `<div><strong>${distKm} km</strong> &middot; ${timeStr}</div>`;
+
+  if (alternateTrips.length > 0) {
+    html += `<div class="alt-info">${alternateTrips.length} alternative${alternateTrips.length > 1 ? 's' : ''} found</div>`;
+    alternateTrips.forEach((alt, i) => {
+      const altSummary = alt.summary || {};
+      const altDist = (altSummary.length || 0).toFixed(1);
+      const altTimeSec = altSummary.time || 0;
+      const altTimeMin = Math.round(altTimeSec / 60);
+      const altTimeStr = altTimeMin >= 60
+        ? `${Math.floor(altTimeMin / 60)}h ${altTimeMin % 60}m`
+        : `${altTimeMin}m`;
+      html += `<div class="alt-info" style="color:#888;">Alt ${i + 1}: ${altDist} km &middot; ${altTimeStr}</div>`;
+    });
+  }
+
+  elRouteSummary.innerHTML = html;
+  elRouteInfoSection.style.display = 'block';
+}
+
+// ---------------------------------------------------------------------------
+// Map route layers and sources
+// ---------------------------------------------------------------------------
+
+/**
+ * Initialize route sources and layers on the map (called once on map load).
+ */
+function initRouteLayersOnMap() {
+  // Source for alternative routes (added first so they render below main)
+  map.addSource('route-alternatives', {
+    type: 'geojson',
+    data: { type: 'FeatureCollection', features: [] },
+  });
+  map.addLayer({
+    id: 'route-alternatives-line',
+    type: 'line',
+    source: 'route-alternatives',
+    layout: {
+      'line-cap': 'round',
+      'line-join': 'round',
+    },
+    paint: {
+      'line-color': '#888888',
+      'line-width': 3,
+      'line-dasharray': [2, 2],
+    },
+  });
+
+  // Source for main route
+  map.addSource('route-main', {
+    type: 'geojson',
+    data: { type: 'FeatureCollection', features: [] },
+  });
+  map.addLayer({
+    id: 'route-main-line',
+    type: 'line',
+    source: 'route-main',
+    layout: {
+      'line-cap': 'round',
+      'line-join': 'round',
+    },
+    paint: {
+      'line-color': '#007AFF',
+      'line-width': 4,
+    },
+  });
+}
+
+/**
+ * Initialize the distance-limited route layers (faded portion beyond the limit).
+ */
+let distanceLimitLayersInitialized = false;
+
+function initDistanceLimitLayers() {
+  if (distanceLimitLayersInitialized) return;
+  distanceLimitLayersInitialized = true;
+
+  // Source for the faded/dashed "beyond limit" portion of the route
+  map.addSource('route-beyond-limit', {
+    type: 'geojson',
+    data: { type: 'FeatureCollection', features: [] },
+  });
+  map.addLayer({
+    id: 'route-beyond-limit-line',
+    type: 'line',
+    source: 'route-beyond-limit',
+    layout: {
+      'line-cap': 'round',
+      'line-join': 'round',
+    },
+    paint: {
+      'line-color': '#007AFF',
+      'line-width': 4,
+      'line-opacity': 0.25,
+      'line-dasharray': [4, 4],
+    },
+  });
+
+  // Source for the distance limit marker (a small circle at the cutoff point)
+  map.addSource('distance-limit-marker', {
+    type: 'geojson',
+    data: { type: 'FeatureCollection', features: [] },
+  });
+  map.addLayer({
+    id: 'distance-limit-marker-circle',
+    type: 'circle',
+    source: 'distance-limit-marker',
+    paint: {
+      'circle-radius': 6,
+      'circle-color': '#ff6b35',
+      'circle-stroke-color': '#fff',
+      'circle-stroke-width': 2,
+    },
+  });
+}
+
+function clearDistanceLimitLayers() {
+  if (!distanceLimitLayersInitialized) return;
+  if (map.getSource('route-beyond-limit')) {
+    map.getSource('route-beyond-limit').setData({ type: 'FeatureCollection', features: [] });
+  }
+  if (map.getSource('distance-limit-marker')) {
+    map.getSource('distance-limit-marker').setData({ type: 'FeatureCollection', features: [] });
+  }
+}
+
+/**
+ * Split a polyline at a given distance from the start.
+ * Returns { within: [[lat,lon],...], beyond: [[lat,lon],...], cutoffPoint: [lat,lon] | null }
+ */
+function splitPolylineAtDistance(points, limitKm) {
+  if (limitKm <= 0 || points.length < 2) {
+    return { within: points, beyond: [], cutoffPoint: null };
+  }
+
+  let accumulated = 0;
+  for (let i = 1; i < points.length; i++) {
+    const segDist = equirectangularDistance(
+      points[i - 1][0], points[i - 1][1],
+      points[i][0], points[i][1]
+    );
+
+    if (accumulated + segDist >= limitKm) {
+      // Interpolate the cutoff point along this segment
+      const remaining = limitKm - accumulated;
+      const fraction = remaining / segDist;
+      const cutLat = points[i - 1][0] + fraction * (points[i][0] - points[i - 1][0]);
+      const cutLon = points[i - 1][1] + fraction * (points[i][1] - points[i - 1][1]);
+
+      const within = points.slice(0, i);
+      within.push([cutLat, cutLon]);
+
+      const beyond = [[cutLat, cutLon], ...points.slice(i)];
+
+      return { within, beyond, cutoffPoint: [cutLat, cutLon] };
+    }
+
+    accumulated += segDist;
+  }
+
+  // Entire route is within the limit
+  return { within: points, beyond: [], cutoffPoint: null };
+}
+
+/**
+ * Render the distance limit visualization on the map:
+ * - The main route source shows only the "within" portion (solid blue)
+ * - The "beyond limit" source shows the rest (faded, dashed)
+ * - A marker is placed at the cutoff point
+ */
+function renderDistanceLimitOnMap(mainPoints, limitKm) {
+  initDistanceLimitLayers();
+
+  if (limitKm <= 0) {
+    // No limit: clear the beyond-limit layers and show full route
+    clearDistanceLimitLayers();
+    return;
+  }
+
+  const { within, beyond, cutoffPoint } = splitPolylineAtDistance(mainPoints, limitKm);
+
+  // Update main route to show only the within portion
+  if (within.length > 1) {
+    map.getSource('route-main').setData({
+      type: 'FeatureCollection',
+      features: [pointsToLineFeature(within)],
+    });
+  }
+
+  // Show the beyond portion as faded/dashed
+  if (beyond.length > 1) {
+    map.getSource('route-beyond-limit').setData({
+      type: 'FeatureCollection',
+      features: [pointsToLineFeature(beyond)],
+    });
+  } else {
+    map.getSource('route-beyond-limit').setData({ type: 'FeatureCollection', features: [] });
+  }
+
+  // Show cutoff marker
+  if (cutoffPoint) {
+    map.getSource('distance-limit-marker').setData({
+      type: 'FeatureCollection',
+      features: [{
+        type: 'Feature',
+        geometry: { type: 'Point', coordinates: [cutoffPoint[1], cutoffPoint[0]] },
+        properties: {},
+      }],
+    });
+  } else {
+    map.getSource('distance-limit-marker').setData({ type: 'FeatureCollection', features: [] });
+  }
+}
+
+/**
+ * Convert an array of [lat, lon] points to a GeoJSON LineString Feature.
+ */
+function pointsToLineFeature(points) {
+  return {
+    type: 'Feature',
+    geometry: {
+      type: 'LineString',
+      coordinates: points.map(p => [p[1], p[0]]), // GeoJSON uses [lon, lat]
+    },
+    properties: {},
+  };
+}
+
+/**
+ * Render route lines on the map.
+ */
+function renderRouteOnMap(mainPoints, altPointsArray) {
+  // Main route
+  const mainFeature = mainPoints.length > 0
+    ? { type: 'FeatureCollection', features: [pointsToLineFeature(mainPoints)] }
+    : { type: 'FeatureCollection', features: [] };
+  map.getSource('route-main').setData(mainFeature);
+
+  // Alternative routes
+  const altFeatures = altPointsArray
+    .filter(pts => pts.length > 0)
+    .map(pts => pointsToLineFeature(pts));
+  map.getSource('route-alternatives').setData({
+    type: 'FeatureCollection',
+    features: altFeatures,
+  });
+}
+
+/**
+ * Clear route lines from the map.
+ */
+function clearRouteFromMap() {
+  if (map.getSource('route-main')) {
+    map.getSource('route-main').setData({ type: 'FeatureCollection', features: [] });
+  }
+  if (map.getSource('route-alternatives')) {
+    map.getSource('route-alternatives').setData({ type: 'FeatureCollection', features: [] });
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Valhalla routing
+// ---------------------------------------------------------------------------
+
+/**
+ * Request a route from Valhalla.
+ * Returns { mainTrip, alternateTrips } where each trip has legs[].shape.
+ */
+async function requestRoute(start, end) {
+  const valhallaUrl = document.getElementById('valhalla-url').value.replace(/\/$/, '');
+  const useAlts = document.getElementById('opt-alternatives').checked;
+
+  const body = {
+    locations: [
+      { lat: start.lat, lon: start.lon },
+      { lat: end.lat, lon: end.lon },
+    ],
+    costing: 'auto',
+    date_time: { type: 0 },
+    prioritize_bidirectional: true,
+  };
+
+  if (useAlts) {
+    body.alternates = 3;
+  }
+
+  const response = await fetch(`${valhallaUrl}/route`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'text/plain' },
+    body: JSON.stringify(body),
+  });
+
+  if (!response.ok) {
+    let errMsg = `Valhalla returned ${response.status}`;
+    try {
+      const errBody = await response.json();
+      if (errBody.error) errMsg += `: ${errBody.error}`;
+    } catch (_) {}
+    throw new Error(errMsg);
+  }
+
+  const data = await response.json();
+
+  if (!data.trip) {
+    throw new Error('Valhalla response missing trip data');
+  }
+
+  const mainTrip = data.trip;
+  const alternateTrips = (data.alternates || []).map(a => a.trip).filter(Boolean);
+
+  return { mainTrip, alternateTrips };
+}
+
+/**
+ * Decode all leg shapes from a Valhalla trip into a single array of [lat, lon] points.
+ */
+function decodeTrip(trip) {
+  const allPoints = [];
+  for (const leg of (trip.legs || [])) {
+    if (!leg.shape) continue;
+    const points = decodePolyline6(leg.shape);
+    // Avoid duplicating the junction point between legs
+    if (allPoints.length > 0 && points.length > 0) {
+      points.shift();
+    }
+    allPoints.push(...points);
+  }
+  return allPoints;
+}
+
+/**
+ * Full route flow: request route, decode, render, update UI.
+ */
+async function performRouting() {
+  if (!startLatLon || !endLatLon) return;
+
+  hideError();
+  showProgress('Requesting route from Valhalla...');
+  clearRouteFromMap();
+  elRouteInfoSection.style.display = 'none';
+
+  try {
+    const { mainTrip, alternateTrips } = await requestRoute(startLatLon, endLatLon);
+
+    // Decode shapes
+    const mainPoints = decodeTrip(mainTrip);
+    const altPointsArray = alternateTrips.map(t => decodeTrip(t));
+
+    // Store route data for later use (tile computation)
+    routeData = { main: mainPoints, alternatives: altPointsArray };
+
+    // Render on map
+    renderRouteOnMap(mainPoints, altPointsArray);
+
+    // Update sidebar
+    updateRouteSummaryUI(mainTrip, alternateTrips);
+
+    // Fit map to show the route
+    if (mainPoints.length > 0) {
+      const allPts = [...mainPoints, ...altPointsArray.flat()];
+      const lngs = allPts.map(p => p[1]);
+      const lats = allPts.map(p => p[0]);
+      const bounds = [
+        [Math.min(...lngs), Math.min(...lats)],
+        [Math.max(...lngs), Math.max(...lats)],
+      ];
+      map.fitBounds(bounds, { padding: 60 });
+    }
+
+    hideProgress();
+    console.log(`Route: ${mainPoints.length} points, ${altPointsArray.length} alternatives`);
+
+    // Compute tiles and fetch sizes
+    await computeAndDisplayTiles();
+  } catch (err) {
+    hideProgress();
+    showError(err.message);
+    console.error('Routing error:', err);
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Right-click handler for route waypoints
+// ---------------------------------------------------------------------------
+map.on('contextmenu', (e) => {
+  if (getSelectedMode() !== 'route') return;
+
+  const { lat, lng: lon } = e.lngLat;
+
+  if (!startLatLon) {
+    // First right-click: set start marker
+    startLatLon = { lat, lon };
+    startMarker = new maplibregl.Marker({ color: '#28a745' })
+      .setLngLat([lon, lat])
+      .addTo(map);
+    updateWaypointsUI();
+  } else if (!endLatLon) {
+    // Second right-click: set end marker and trigger routing
+    endLatLon = { lat, lon };
+    endMarker = new maplibregl.Marker({ color: '#dc3545' })
+      .setLngLat([lon, lat])
+      .addTo(map);
+    updateWaypointsUI();
+    performRouting();
+  } else {
+    // Already have both markers: move end marker and re-route
+    endLatLon = { lat, lon };
+    endMarker.setLngLat([lon, lat]);
+    updateWaypointsUI();
+    performRouting();
+  }
+});
+
+// Prevent default context menu on the map
+map.getCanvas().addEventListener('contextmenu', (e) => e.preventDefault());
+
+// ---------------------------------------------------------------------------
+// Clear button
+// ---------------------------------------------------------------------------
+function clearAll() {
+  hideError();
+  hideProgress();
+
+  // Remove markers
+  if (startMarker) { startMarker.remove(); startMarker = null; }
+  if (endMarker) { endMarker.remove(); endMarker = null; }
+  startLatLon = null;
+  endLatLon = null;
+  routeData = null;
+
+  // Clear bbox state
+  bboxDrawing = false;
+  bboxStartPoint = null;
+  bboxStartLatLon = null;
+  bboxEndLatLon = null;
+  bboxRect = null;
+
+  // Clear radius state
+  if (radiusCenterMarker) { radiusCenterMarker.remove(); radiusCenterMarker = null; }
+  radiusCenterLatLon = null;
+  radiusCirclePoly = null;
+
+  // Clear polygon state
+  for (const m of polygonMarkers) { m.remove(); }
+  polygonMarkers = [];
+  polygonVertices = [];
+  polygonClosed = false;
+  clearPolygonDrawingLine();
+
+  // Clear country state
+  countrySelectedEntry = null;
+  countryPolygonGeoJSON = null;
+  if (elCountrySelectedInfo) elCountrySelectedInfo.innerHTML = '';
+  if (elCountrySearch) elCountrySearch.value = '';
+  if (elCountryList) elCountryList.innerHTML = '';
+
+  // Clear route lines, tile bboxes, and selection polygon
+  clearRouteFromMap();
+  clearTileBboxesFromMap();
+  clearSelectionPolygonFromMap();
+
+  // Clear distance limit layers
+  clearDistanceLimitLayers();
+
+  // Reset tile data, highlight, and cache accumulator
+  highlightedTileItem = null;
+  lastTileData = null;
+  cacheAccumulator.clear();
+  cacheInsertionCounter = 0;
+
+  // Reset budget bar and eviction notice
+  updateBudgetBar();
+  elEvictionNotice.classList.remove('visible');
+
+  // Reset sidebar UI
+  updateWaypointsUI();
+  updateBboxUI();
+  updateRadiusUI();
+  updatePolygonUI();
+  // Country UI is cleared above (search, list, selected info)
+  elRouteInfoSection.style.display = 'none';
+  elRouteSummary.innerHTML = '';
+  elResultsSection.style.display = 'none';
+  elTileListSection.style.display = 'none';
+  elResultsSummary.innerHTML = '';
+  elTileList.innerHTML = '';
+}
+
+document.getElementById('btn-clear').addEventListener('click', clearAll);
+
+// ---------------------------------------------------------------------------
+// Re-route when toggles change (if both markers set)
+// ---------------------------------------------------------------------------
+document.getElementById('opt-alternatives').addEventListener('change', () => {
+  if (startLatLon && endLatLon) performRouting();
+});
+
+// Re-fetch tile sizes when compression toggle changes
+// ---------------------------------------------------------------------------
+// Bbox UI update
+// ---------------------------------------------------------------------------
+
+/**
+ * Update the bbox info section in the sidebar.
+ */
+function updateBboxUI() {
+  if (!bboxRect) {
+    elBboxInfo.innerHTML = '<div class="instruction">Right-click and drag on the map to draw a rectangle</div>';
+    return;
+  }
+  elBboxInfo.innerHTML = `
+    <div class="bbox-info">
+      <div><strong>SW:</strong> <span class="coord">${bboxRect.south.toFixed(5)}, ${bboxRect.west.toFixed(5)}</span></div>
+      <div><strong>NE:</strong> <span class="coord">${bboxRect.north.toFixed(5)}, ${bboxRect.east.toFixed(5)}</span></div>
+      <div style="margin-top:4px; color:#888; font-size:11px;">
+        ${(bboxRect.north - bboxRect.south).toFixed(3)}&deg; x ${(bboxRect.east - bboxRect.west).toFixed(3)}&deg;
+      </div>
+    </div>
+  `;
+}
+
+// ---------------------------------------------------------------------------
+// Selection polygon layer (shared across bbox/radius/polygon/country modes)
+// ---------------------------------------------------------------------------
+
+let selectionPolygonInitialized = false;
+
+function initSelectionPolygonLayer() {
+  if (selectionPolygonInitialized) return;
+  selectionPolygonInitialized = true;
+
+  map.addSource('selection-polygon', {
+    type: 'geojson',
+    data: { type: 'FeatureCollection', features: [] },
+  });
+
+  // Fill layer
+  map.addLayer({
+    id: 'selection-polygon-fill',
+    type: 'fill',
+    source: 'selection-polygon',
+    paint: {
+      'fill-color': '#0d6efd',
+      'fill-opacity': 0.1,
+    },
+  });
+
+  // Line (stroke) layer
+  map.addLayer({
+    id: 'selection-polygon-line',
+    type: 'line',
+    source: 'selection-polygon',
+    paint: {
+      'line-color': '#0d6efd',
+      'line-width': 2,
+      'line-opacity': 0.7,
+    },
+  });
+}
+
+/**
+ * Show a polygon on the selection polygon layer.
+ * @param {Array} coordinates - GeoJSON polygon coordinates (array of rings)
+ */
+function setSelectionPolygon(coordinates) {
+  initSelectionPolygonLayer();
+  map.getSource('selection-polygon').setData({
+    type: 'FeatureCollection',
+    features: [{
+      type: 'Feature',
+      geometry: { type: 'Polygon', coordinates },
+      properties: {},
+    }],
+  });
+}
+
+/**
+ * Clear the selection polygon from the map.
+ */
+function clearSelectionPolygonFromMap() {
+  if (!selectionPolygonInitialized) return;
+  if (map.getSource('selection-polygon')) {
+    map.getSource('selection-polygon').setData({ type: 'FeatureCollection', features: [] });
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Bbox drawing handlers
+// ---------------------------------------------------------------------------
+
+map.on('mousedown', (e) => {
+  if (getSelectedMode() !== 'bbox') return;
+  // Only start drawing on right-click (button 2)
+  if (e.originalEvent.button !== 2) return;
+
+  bboxDrawing = true;
+  bboxStartPoint = e.point;
+  bboxStartLatLon = { lat: e.lngLat.lat, lon: e.lngLat.lng };
+  bboxEndLatLon = null;
+  bboxRect = null;
+
+  // Prevent context menu from appearing
+  e.preventDefault();
+});
+
+map.on('mousemove', (e) => {
+  if (!bboxDrawing) return;
+  if (getSelectedMode() !== 'bbox') return;
+
+  const currentLatLon = { lat: e.lngLat.lat, lon: e.lngLat.lng };
+
+  // Compute preview rectangle
+  const south = Math.min(bboxStartLatLon.lat, currentLatLon.lat);
+  const north = Math.max(bboxStartLatLon.lat, currentLatLon.lat);
+  const west = Math.min(bboxStartLatLon.lon, currentLatLon.lon);
+  const east = Math.max(bboxStartLatLon.lon, currentLatLon.lon);
+
+  // Show preview rectangle on map
+  setSelectionPolygon([[
+    [west, south],
+    [east, south],
+    [east, north],
+    [west, north],
+    [west, south],
+  ]]);
+});
+
+map.on('mouseup', async (e) => {
+  if (!bboxDrawing) return;
+  if (getSelectedMode() !== 'bbox') return;
+
+  bboxDrawing = false;
+  bboxEndLatLon = { lat: e.lngLat.lat, lon: e.lngLat.lng };
+
+  // Compute finalized rectangle
+  const south = Math.min(bboxStartLatLon.lat, bboxEndLatLon.lat);
+  const north = Math.max(bboxStartLatLon.lat, bboxEndLatLon.lat);
+  const west = Math.min(bboxStartLatLon.lon, bboxEndLatLon.lon);
+  const east = Math.max(bboxStartLatLon.lon, bboxEndLatLon.lon);
+
+  // Ignore tiny drags (less than ~5 pixels worth of movement)
+  if (Math.abs(north - south) < 0.001 && Math.abs(east - west) < 0.001) {
+    clearSelectionPolygonFromMap();
+    return;
+  }
+
+  bboxRect = { south, west, north, east };
+
+  // Show finalized rectangle on map
+  setSelectionPolygon([[
+    [west, south],
+    [east, south],
+    [east, north],
+    [west, north],
+    [west, south],
+  ]]);
+
+  // Update sidebar UI
+  updateBboxUI();
+
+  // Compute tiles within bbox and fetch sizes
+  await computeAndDisplayTilesForBbox();
+});
+
+// ---------------------------------------------------------------------------
+// Tile collection from bbox
+// ---------------------------------------------------------------------------
+
+/**
+ * Collect all tile IDs at all 3 levels within a bounding box.
+ * Iterates row/col ranges within the bbox at each level.
+ * Returns a Map of levelIndex -> Set of tileIds.
+ */
+function collectTilesFromBbox(bbox) {
+  const tileSets = new Map();
+  for (let li = 0; li < TILE_LEVELS.length; li++) {
+    const tileSet = new Set();
+
+    if (isLevelEnabled(li)) {
+      const lvl = TILE_LEVELS[li];
+      const minRow = Math.floor((bbox.south + 90) / lvl.size);
+      const maxRow = Math.floor((bbox.north + 90) / lvl.size);
+      const minCol = Math.floor((bbox.west + 180) / lvl.size);
+      const maxCol = Math.floor((bbox.east + 180) / lvl.size);
+
+      for (let row = minRow; row <= maxRow; row++) {
+        for (let col = minCol; col <= maxCol; col++) {
+          const tileId = row * lvl.cols + col;
+          tileSet.add(tileId);
+        }
+      }
+    }
+
+    tileSets.set(li, tileSet);
+  }
+  return tileSets;
+}
+
+/**
+ * Compute and display tiles for the current bbox selection.
+ */
+async function computeAndDisplayTilesForBbox() {
+  if (!bboxRect) return;
+
+  hideError();
+
+  // Collect tiles within bbox
+  const tileSets = collectTilesFromBbox(bboxRect);
+
+  // Build flat list for HEAD requests
+  const allTiles = [];
+  for (let li = 0; li < TILE_LEVELS.length; li++) {
+    const tileIds = tileSets.get(li);
+    for (const tileId of tileIds) {
+      allTiles.push({
+        level: li,
+        tileId,
+        path: tileIdToPath(tileId, TILE_LEVELS[li].level),
+      });
+    }
+  }
+
+  console.log(`Bbox: collected ${allTiles.length} unique tiles across ${TILE_LEVELS.length} levels`);
+
+  // Deduplicate by path
+  const uniqueTiles = [];
+  const seenPaths = new Set();
+  for (const tile of allTiles) {
+    if (!seenPaths.has(tile.path)) {
+      seenPaths.add(tile.path);
+      uniqueTiles.push(tile);
+    }
+  }
+
+  lastSelection.uniqueTiles = uniqueTiles;
+  lastSelection.tileSets = tileSets;
+
+  let sizeResults;
+  try {
+    sizeResults = await fetchTileSizes(uniqueTiles);
+  } catch (err) {
+    showError(`Failed to fetch tile sizes: ${err.message}`);
+    return;
+  }
+
+  applyResults(tileSets, sizeResults);
+}
+
+// ---------------------------------------------------------------------------
+// Radius mode: UI, handlers, tile computation
+// ---------------------------------------------------------------------------
+
+const elRadiusInfo = document.getElementById('radius-info');
+const elRadiusSlider = document.getElementById('radius-slider');
+const elRadiusValue = document.getElementById('radius-value');
+
+/**
+ * Update the radius info section in the sidebar.
+ */
+function updateRadiusUI() {
+  if (!radiusCenterLatLon) {
+    elRadiusInfo.innerHTML = '<div class="instruction">Right-click on map to place center point</div>';
+    return;
+  }
+  elRadiusInfo.innerHTML = `
+    <div class="marker-info">
+      <span style="color:#0d6efd; font-weight:600;">Center:</span>
+      <span class="coord">${formatCoord(radiusCenterLatLon.lat, radiusCenterLatLon.lon)}</span>
+    </div>
+  `;
+}
+
+/**
+ * Generate circle polygon, render on map, and compute tiles.
+ */
+async function updateRadiusCircle() {
+  if (!radiusCenterLatLon) return;
+
+  const radiusKm = parseInt(elRadiusSlider.value, 10);
+  elRadiusValue.textContent = `${radiusKm} km`;
+
+  // Generate circle polygon using Turf.js
+  const center = [radiusCenterLatLon.lon, radiusCenterLatLon.lat]; // Turf uses [lon, lat]
+  radiusCirclePoly = turf.circle(center, radiusKm, { units: 'kilometers', steps: 64 });
+
+  // Render circle on map using the shared selection polygon layer
+  setSelectionPolygon(radiusCirclePoly.geometry.coordinates);
+
+  // Compute tiles within the circle
+  await computeAndDisplayTilesForRadius();
+}
+
+/**
+ * Compute tiles within the radius circle and fetch sizes.
+ * Strategy: get bbox of circle, iterate all tiles in bbox, filter by intersection with circle.
+ */
+async function computeAndDisplayTilesForRadius() {
+  if (!radiusCirclePoly) return;
+
+  hideError();
+
+  // Get bounding box of the circle: [west, south, east, north]
+  const bboxArr = turf.bbox(radiusCirclePoly);
+  const circleBbox = { south: bboxArr[1], west: bboxArr[0], north: bboxArr[3], east: bboxArr[2] };
+
+  // Collect all tiles in the bbox, then filter to those intersecting the circle
+  const tileSets = new Map();
+  for (let li = 0; li < TILE_LEVELS.length; li++) {
+    const tileSet = new Set();
+
+    if (isLevelEnabled(li)) {
+      const lvl = TILE_LEVELS[li];
+      const minRow = Math.floor((circleBbox.south + 90) / lvl.size);
+      const maxRow = Math.floor((circleBbox.north + 90) / lvl.size);
+      const minCol = Math.floor((circleBbox.west + 180) / lvl.size);
+      const maxCol = Math.floor((circleBbox.east + 180) / lvl.size);
+
+      for (let row = minRow; row <= maxRow; row++) {
+        for (let col = minCol; col <= maxCol; col++) {
+          const tileId = row * lvl.cols + col;
+          const tileBbox = tileIdToBbox(tileId, li);
+
+          // Create a polygon from the tile bbox for intersection test
+          const tilePoly = turf.bboxPolygon([tileBbox.west, tileBbox.south, tileBbox.east, tileBbox.north]);
+
+          if (turf.booleanIntersects(tilePoly, radiusCirclePoly)) {
+            tileSet.add(tileId);
+          }
+        }
+      }
+    }
+
+    tileSets.set(li, tileSet);
+  }
+
+  // Build flat list for HEAD requests
+  const allTiles = [];
+  for (let li = 0; li < TILE_LEVELS.length; li++) {
+    const tileIds = tileSets.get(li);
+    for (const tileId of tileIds) {
+      allTiles.push({
+        level: li,
+        tileId,
+        path: tileIdToPath(tileId, TILE_LEVELS[li].level),
+      });
+    }
+  }
+
+  console.log(`Radius: collected ${allTiles.length} unique tiles across ${TILE_LEVELS.length} levels`);
+
+  // Deduplicate by path
+  const uniqueTiles = [];
+  const seenPaths = new Set();
+  for (const tile of allTiles) {
+    if (!seenPaths.has(tile.path)) {
+      seenPaths.add(tile.path);
+      uniqueTiles.push(tile);
+    }
+  }
+
+  lastSelection.uniqueTiles = uniqueTiles;
+  lastSelection.tileSets = tileSets;
+
+  let sizeResults;
+  try {
+    sizeResults = await fetchTileSizes(uniqueTiles);
+  } catch (err) {
+    showError(`Failed to fetch tile sizes: ${err.message}`);
+    return;
+  }
+
+  applyResults(tileSets, sizeResults);
+}
+
+// Right-click handler for radius mode: place center point
+map.on('contextmenu', (e) => {
+  if (getSelectedMode() !== 'radius') return;
+
+  const { lat, lng: lon } = e.lngLat;
+
+  // Place or move center marker
+  radiusCenterLatLon = { lat, lon };
+  if (radiusCenterMarker) {
+    radiusCenterMarker.setLngLat([lon, lat]);
+  } else {
+    radiusCenterMarker = new maplibregl.Marker({ color: '#0d6efd' })
+      .setLngLat([lon, lat])
+      .addTo(map);
+  }
+
+  updateRadiusUI();
+  updateRadiusCircle();
+});
+
+// Radius slider change handler
+elRadiusSlider.addEventListener('input', () => {
+  elRadiusValue.textContent = `${elRadiusSlider.value} km`;
+  if (radiusCenterLatLon) {
+    updateRadiusCircle();
+  }
+});
+
+// ---------------------------------------------------------------------------
+// Polygon mode: UI, handlers, tile computation
+// ---------------------------------------------------------------------------
+
+const elPolygonInfo = document.getElementById('polygon-info');
+
+/**
+ * Update the polygon info section in the sidebar.
+ */
+function updatePolygonUI() {
+  if (polygonVertices.length === 0) {
+    elPolygonInfo.innerHTML = '<div class="instruction">Right-click on map to add vertices. Double-right-click to close polygon.</div>';
+    return;
+  }
+  if (polygonClosed) {
+    elPolygonInfo.innerHTML = `
+      <div class="marker-info">
+        <span style="color:#0d6efd; font-weight:600;">Polygon closed:</span>
+        ${polygonVertices.length} vertices
+      </div>
+    `;
+  } else {
+    elPolygonInfo.innerHTML = `
+      <div class="marker-info">
+        <span style="color:#0d6efd; font-weight:600;">Drawing:</span>
+        ${polygonVertices.length} vertex${polygonVertices.length > 1 ? 'es' : ''}
+      </div>
+      <div class="instruction">${polygonVertices.length < 3 ? 'Right-click to add more vertices. Need at least 3 to close.' : 'Double-right-click or click "Close" to finish.'}</div>
+    `;
+  }
+}
+
+/**
+ * Initialize the polygon drawing line layer (for in-progress preview).
+ */
+function initPolygonDrawingLine() {
+  if (polygonDrawingLineInitialized) return;
+  polygonDrawingLineInitialized = true;
+
+  map.addSource('polygon-drawing-line', {
+    type: 'geojson',
+    data: { type: 'FeatureCollection', features: [] },
+  });
+
+  map.addLayer({
+    id: 'polygon-drawing-line-layer',
+    type: 'line',
+    source: 'polygon-drawing-line',
+    paint: {
+      'line-color': '#0d6efd',
+      'line-width': 2,
+      'line-dasharray': [3, 2],
+      'line-opacity': 0.7,
+    },
+  });
+}
+
+/**
+ * Update the polygon-in-progress preview line on the map.
+ */
+function updatePolygonDrawingLine() {
+  initPolygonDrawingLine();
+
+  if (polygonVertices.length < 2 || polygonClosed) {
+    map.getSource('polygon-drawing-line').setData({ type: 'FeatureCollection', features: [] });
+    return;
+  }
+
+  const coords = polygonVertices.map(v => [v.lon, v.lat]);
+  map.getSource('polygon-drawing-line').setData({
+    type: 'FeatureCollection',
+    features: [{
+      type: 'Feature',
+      geometry: { type: 'LineString', coordinates: coords },
+      properties: {},
+    }],
+  });
+}
+
+/**
+ * Clear the polygon drawing line from the map.
+ */
+function clearPolygonDrawingLine() {
+  if (!polygonDrawingLineInitialized) return;
+  if (map.getSource('polygon-drawing-line')) {
+    map.getSource('polygon-drawing-line').setData({ type: 'FeatureCollection', features: [] });
+  }
+}
+
+/**
+ * Add a vertex to the polygon being drawn.
+ */
+function addPolygonVertex(lat, lon) {
+  if (polygonClosed) return;
+
+  polygonVertices.push({ lat, lon });
+
+  // Add a small circle marker for this vertex
+  const el = document.createElement('div');
+  el.style.width = '10px';
+  el.style.height = '10px';
+  el.style.borderRadius = '50%';
+  el.style.background = '#0d6efd';
+  el.style.border = '2px solid #fff';
+  el.style.boxShadow = '0 0 3px rgba(0,0,0,0.4)';
+
+  const marker = new maplibregl.Marker({ element: el })
+    .setLngLat([lon, lat])
+    .addTo(map);
+  polygonMarkers.push(marker);
+
+  // Update preview line
+  updatePolygonDrawingLine();
+  updatePolygonUI();
+}
+
+/**
+ * Close the polygon (connect last vertex to first) and compute tiles.
+ */
+async function closePolygon() {
+  if (polygonVertices.length < 3) return;
+  if (polygonClosed) return;
+
+  polygonClosed = true;
+
+  // Build the closed polygon ring: vertices + close back to first
+  const coords = polygonVertices.map(v => [v.lon, v.lat]);
+  coords.push([polygonVertices[0].lon, polygonVertices[0].lat]); // close ring
+
+  // Render as filled polygon using the shared selection polygon layer
+  setSelectionPolygon([coords]);
+
+  // Clear the in-progress drawing line
+  clearPolygonDrawingLine();
+
+  updatePolygonUI();
+
+  // Compute tiles within the polygon
+  await computeAndDisplayTilesForPolygon();
+}
+
+/**
+ * Undo the last vertex added to the polygon.
+ */
+function undoPolygonVertex() {
+  if (polygonClosed || polygonVertices.length === 0) return;
+
+  polygonVertices.pop();
+  const marker = polygonMarkers.pop();
+  if (marker) marker.remove();
+
+  updatePolygonDrawingLine();
+  updatePolygonUI();
+}
+
+/**
+ * Compute tiles within the polygon and fetch sizes.
+ * Same strategy as radius: get bbox of polygon, iterate all tiles in bbox,
+ * filter by intersection with the polygon.
+ */
+async function computeAndDisplayTilesForPolygon() {
+  if (!polygonClosed || polygonVertices.length < 3) return;
+
+  hideError();
+
+  // Build a Turf polygon from vertices
+  const coords = polygonVertices.map(v => [v.lon, v.lat]);
+  coords.push([polygonVertices[0].lon, polygonVertices[0].lat]); // close ring
+  const polygonGeoJSON = turf.polygon([coords]);
+
+  // Get bounding box: [west, south, east, north]
+  const bboxArr = turf.bbox(polygonGeoJSON);
+  const polyBbox = { south: bboxArr[1], west: bboxArr[0], north: bboxArr[3], east: bboxArr[2] };
+
+  // Collect all tiles in the bbox, then filter to those intersecting the polygon
+  const tileSets = new Map();
+  for (let li = 0; li < TILE_LEVELS.length; li++) {
+    const tileSet = new Set();
+
+    if (isLevelEnabled(li)) {
+      const lvl = TILE_LEVELS[li];
+      const minRow = Math.floor((polyBbox.south + 90) / lvl.size);
+      const maxRow = Math.floor((polyBbox.north + 90) / lvl.size);
+      const minCol = Math.floor((polyBbox.west + 180) / lvl.size);
+      const maxCol = Math.floor((polyBbox.east + 180) / lvl.size);
+
+      for (let row = minRow; row <= maxRow; row++) {
+        for (let col = minCol; col <= maxCol; col++) {
+          const tileId = row * lvl.cols + col;
+          const tileBbox = tileIdToBbox(tileId, li);
+
+          // Create a polygon from the tile bbox for intersection test
+          const tilePoly = turf.bboxPolygon([tileBbox.west, tileBbox.south, tileBbox.east, tileBbox.north]);
+
+          if (turf.booleanIntersects(tilePoly, polygonGeoJSON)) {
+            tileSet.add(tileId);
+          }
+        }
+      }
+    }
+
+    tileSets.set(li, tileSet);
+  }
+
+  // Build flat list for HEAD requests
+  const allTiles = [];
+  for (let li = 0; li < TILE_LEVELS.length; li++) {
+    const tileIds = tileSets.get(li);
+    for (const tileId of tileIds) {
+      allTiles.push({
+        level: li,
+        tileId,
+        path: tileIdToPath(tileId, TILE_LEVELS[li].level),
+      });
+    }
+  }
+
+  console.log(`Polygon: collected ${allTiles.length} unique tiles across ${TILE_LEVELS.length} levels`);
+
+  // Deduplicate by path
+  const uniqueTiles = [];
+  const seenPaths = new Set();
+  for (const tile of allTiles) {
+    if (!seenPaths.has(tile.path)) {
+      seenPaths.add(tile.path);
+      uniqueTiles.push(tile);
+    }
+  }
+
+  lastSelection.uniqueTiles = uniqueTiles;
+  lastSelection.tileSets = tileSets;
+
+  let sizeResults;
+  try {
+    sizeResults = await fetchTileSizes(uniqueTiles);
+  } catch (err) {
+    showError(`Failed to fetch tile sizes: ${err.message}`);
+    return;
+  }
+
+  applyResults(tileSets, sizeResults);
+}
+
+// Right-click handler for polygon mode.
+// Right-click adds vertices. Double-right-click closes the polygon.
+// We use a short timer to distinguish single from double right-clicks.
+let polygonClickTimer = null;
+
+map.on('contextmenu', (e) => {
+  if (getSelectedMode() !== 'polygon') return;
+  if (polygonClosed) return;
+
+  e.preventDefault();
+  const { lat, lng: lon } = e.lngLat;
+
+  // Use a timer to distinguish single right-click from double right-click.
+  // If another right-click comes within 300ms, treat as double = close polygon.
+  if (polygonClickTimer) {
+    // Second right-click within timer window → close polygon
+    clearTimeout(polygonClickTimer);
+    polygonClickTimer = null;
+    if (polygonVertices.length >= 3) {
+      closePolygon();
+    }
+    return;
+  }
+
+  polygonClickTimer = setTimeout(() => {
+    polygonClickTimer = null;
+    addPolygonVertex(lat, lon);
+  }, 300);
+});
+
+// Undo last vertex button
+document.getElementById('btn-polygon-undo').addEventListener('click', undoPolygonVertex);
+
+// Close polygon button
+document.getElementById('btn-polygon-close').addEventListener('click', () => {
+  if (polygonClosed) return;
+  if (polygonVertices.length < 3) {
+    showError('Need at least 3 vertices to close polygon.');
+    return;
+  }
+  if (polygonClickTimer) {
+    clearTimeout(polygonClickTimer);
+    polygonClickTimer = null;
+  }
+  closePolygon();
+});
+
+// ---------------------------------------------------------------------------
+// Country mode: search, .poly fetch/parse, tile computation
+// ---------------------------------------------------------------------------
+
+let countrySelectedEntry = null;   // { name, url } from GEOFABRIK_COUNTRIES
+let countryPolygonGeoJSON = null;  // turf Feature (Polygon or MultiPolygon)
+
+/**
+ * Render the filtered country list in the dropdown.
+ */
+function renderCountryList(filter) {
+  const query = (filter || '').toLowerCase().trim();
+  const matches = query
+    ? GEOFABRIK_COUNTRIES.filter(c => c.name.toLowerCase().includes(query))
+    : GEOFABRIK_COUNTRIES;
+
+  // Limit to 50 items to avoid sluggishness
+  const shown = matches.slice(0, 50);
+  let html = '';
+  for (const c of shown) {
+    const isSelected = countrySelectedEntry && countrySelectedEntry.url === c.url;
+    html += `<div class="country-item${isSelected ? ' selected' : ''}" data-url="${c.url}">${c.name}</div>`;
+  }
+  if (matches.length > 50) {
+    html += `<div class="country-item" style="color:#888; cursor:default; font-style:italic;">... and ${matches.length - 50} more. Type to narrow down.</div>`;
+  }
+  if (matches.length === 0) {
+    html += `<div class="country-item" style="color:#888; cursor:default; font-style:italic;">No matches found.</div>`;
+  }
+  elCountryList.innerHTML = html;
+
+  // Attach click handlers
+  elCountryList.querySelectorAll('.country-item[data-url]').forEach(el => {
+    el.addEventListener('click', () => {
+      const url = el.getAttribute('data-url');
+      const entry = GEOFABRIK_COUNTRIES.find(c => c.url === url);
+      if (entry) selectCountry(entry);
+    });
+  });
+}
+
+/**
+ * Select a country: fetch .poly, parse, render, compute tiles.
+ */
+async function selectCountry(entry) {
+  countrySelectedEntry = entry;
+  renderCountryList(elCountrySearch.value);
+
+  elCountrySelectedInfo.innerHTML = `
+    <div class="country-selected-info">
+      <span class="country-name">${entry.name}</span> &mdash; fetching boundary...
+    </div>
+  `;
+
+  hideError();
+  showProgress(`Loading boundary for ${entry.name}...`);
+
+  try {
+    // Load .poly from local files (bundled in web/poly/)
+    // Look up pre-bundled .poly data (works with file:// — no server needed)
+    const polyText = POLY_DATA[entry.url];
+    if (!polyText) throw new Error(`No .poly data for ${entry.url}`);
+
+    // Parse .poly format
+    const geoJSON = parsePolyFormat(polyText);
+    if (!geoJSON) {
+      throw new Error('Failed to parse .poly file');
+    }
+
+    countryPolygonGeoJSON = geoJSON;
+
+    hideProgress();
+
+    // Update UI
+    const vertexCount = countVertices(geoJSON);
+    elCountrySelectedInfo.innerHTML = `
+      <div class="country-selected-info">
+        <span class="country-name">${entry.name}</span><br>
+        ${geoJSON.geometry.type === 'MultiPolygon' ? geoJSON.geometry.coordinates.length + ' polygons' : '1 polygon'},
+        ${vertexCount.toLocaleString()} vertices
+      </div>
+    `;
+
+    // Render on map
+    renderCountryOnMap(geoJSON);
+
+    // Fit map to the country
+    const bboxArr = turf.bbox(geoJSON);
+    map.fitBounds([[bboxArr[0], bboxArr[1]], [bboxArr[2], bboxArr[3]]], { padding: 40 });
+
+    // Compute tiles
+    await computeAndDisplayTilesForCountry();
+
+  } catch (err) {
+    hideProgress();
+    showError(err.message);
+    console.error('Country selection error:', err);
+  }
+}
+
+/**
+ * Count total vertices in a GeoJSON Polygon or MultiPolygon feature.
+ */
+function countVertices(feature) {
+  const geom = feature.geometry;
+  let count = 0;
+  if (geom.type === 'Polygon') {
+    for (const ring of geom.coordinates) count += ring.length;
+  } else if (geom.type === 'MultiPolygon') {
+    for (const poly of geom.coordinates) {
+      for (const ring of poly) count += ring.length;
+    }
+  }
+  return count;
+}
+
+/**
+ * Parse Geofabrik .poly format into a GeoJSON Feature (Polygon or MultiPolygon).
+ *
+ * Format:
+ *   polygon_name
+ *   ring_name (or !ring_name for holes)
+ *      lon lat
+ *      lon lat
+ *      ...
+ *   END
+ *   ring_name
+ *      ...
+ *   END
+ *   END
+ *
+ * Returns a turf Feature with Polygon or MultiPolygon geometry.
+ */
+function parsePolyFormat(text) {
+  const lines = text.split('\n').map(l => l.trim()).filter(l => l.length > 0);
+  if (lines.length < 4) return null;
+
+  // First line is the polygon name, skip it
+  let i = 1;
+  const polygons = [];    // Array of polygons, each is array of rings
+  let currentRings = [];  // Rings for the current polygon part
+
+  while (i < lines.length) {
+    const line = lines[i];
+
+    if (line === 'END') {
+      // END of all rings for the current polygon group
+      if (currentRings.length > 0) {
+        polygons.push(currentRings);
+        currentRings = [];
+      }
+      i++;
+      continue;
+    }
+
+    // This line should be a ring name (or !ring_name for holes)
+    const ringName = line;
+    const isHole = ringName.startsWith('!');
+    i++;
+
+    const ringCoords = [];
+    while (i < lines.length && lines[i] !== 'END') {
+      const parts = lines[i].split(/\s+/).filter(p => p.length > 0);
+      if (parts.length >= 2) {
+        const lon = parseFloat(parts[0]);
+        const lat = parseFloat(parts[1]);
+        if (!isNaN(lon) && !isNaN(lat)) {
+          ringCoords.push([lon, lat]);
+        }
+      }
+      i++;
+    }
+
+    // Skip the END that closes this ring
+    if (i < lines.length && lines[i] === 'END') {
+      i++;
+    }
+
+    if (ringCoords.length < 3) continue;
+
+    // Close the ring if not already closed
+    const first = ringCoords[0];
+    const last = ringCoords[ringCoords.length - 1];
+    if (first[0] !== last[0] || first[1] !== last[1]) {
+      ringCoords.push([first[0], first[1]]);
+    }
+
+    if (isHole && currentRings.length > 0) {
+      // Add as hole to the most recent polygon
+      currentRings.push(ringCoords);
+    } else {
+      // New outer ring — if we already have rings accumulated, push them as a polygon
+      if (currentRings.length > 0) {
+        polygons.push(currentRings);
+      }
+      currentRings = [ringCoords];
+    }
+  }
+
+  // Push any remaining rings
+  if (currentRings.length > 0) {
+    polygons.push(currentRings);
+  }
+
+  if (polygons.length === 0) return null;
+
+  // Build GeoJSON
+  if (polygons.length === 1) {
+    return turf.polygon(polygons[0]);
+  } else {
+    return turf.multiPolygon(polygons);
+  }
+}
+
+/**
+ * Render the country polygon on the map using the shared selection polygon layer.
+ * Handles both Polygon and MultiPolygon geometries.
+ */
+function renderCountryOnMap(geoJSON) {
+  initSelectionPolygonLayer();
+  map.getSource('selection-polygon').setData({
+    type: 'FeatureCollection',
+    features: [geoJSON],
+  });
+}
+
+/**
+ * Compute tiles within the country polygon and fetch sizes.
+ * For large countries, this iterates many tiles -- we show progress.
+ */
+async function computeAndDisplayTilesForCountry() {
+  if (!countryPolygonGeoJSON) return;
+
+  hideError();
+
+  // Get bounding box: [west, south, east, north]
+  const bboxArr = turf.bbox(countryPolygonGeoJSON);
+  const polyBbox = { south: bboxArr[1], west: bboxArr[0], north: bboxArr[3], east: bboxArr[2] };
+
+  // Estimate total tiles to check for progress reporting
+  let totalCandidates = 0;
+  for (let li = 0; li < TILE_LEVELS.length; li++) {
+    if (!isLevelEnabled(li)) continue;
+    const lvl = TILE_LEVELS[li];
+    const minRow = Math.floor((polyBbox.south + 90) / lvl.size);
+    const maxRow = Math.floor((polyBbox.north + 90) / lvl.size);
+    const minCol = Math.floor((polyBbox.west + 180) / lvl.size);
+    const maxCol = Math.floor((polyBbox.east + 180) / lvl.size);
+    totalCandidates += (maxRow - minRow + 1) * (maxCol - minCol + 1);
+  }
+
+  if (totalCandidates > 50000) {
+    showProgress(`Large region: checking ~${totalCandidates.toLocaleString()} candidate tiles. This may take a while...`);
+  } else {
+    showProgress(`Checking ~${totalCandidates.toLocaleString()} candidate tiles...`);
+  }
+
+  // Collect tiles with periodic yielding for large regions
+  const tileSets = new Map();
+  let checked = 0;
+
+  for (let li = 0; li < TILE_LEVELS.length; li++) {
+    const tileSet = new Set();
+
+    if (isLevelEnabled(li)) {
+      const lvl = TILE_LEVELS[li];
+      const minRow = Math.floor((polyBbox.south + 90) / lvl.size);
+      const maxRow = Math.floor((polyBbox.north + 90) / lvl.size);
+      const minCol = Math.floor((polyBbox.west + 180) / lvl.size);
+      const maxCol = Math.floor((polyBbox.east + 180) / lvl.size);
+
+      for (let row = minRow; row <= maxRow; row++) {
+        for (let col = minCol; col <= maxCol; col++) {
+          const tileId = row * lvl.cols + col;
+          const tileBbox = tileIdToBbox(tileId, li);
+
+          const tilePoly = turf.bboxPolygon([tileBbox.west, tileBbox.south, tileBbox.east, tileBbox.north]);
+
+          try {
+            if (turf.booleanIntersects(tilePoly, countryPolygonGeoJSON)) {
+              tileSet.add(tileId);
+            }
+          } catch (e) {
+            // Some complex polygons may cause turf errors; skip gracefully
+            console.warn(`Intersection test failed for tile ${tileId} at level ${li}:`, e.message);
+          }
+
+          checked++;
+          // Yield to UI every 500 tiles
+          if (checked % 500 === 0) {
+            showProgress(`Checking tiles: ${checked.toLocaleString()} / ${totalCandidates.toLocaleString()}...`);
+            await new Promise(r => setTimeout(r, 0));
+          }
+        }
+      }
+    }
+
+    tileSets.set(li, tileSet);
+  }
+
+  // Build flat list for HEAD requests
+  const allTiles = [];
+  for (let li = 0; li < TILE_LEVELS.length; li++) {
+    const tileIds = tileSets.get(li);
+    for (const tileId of tileIds) {
+      allTiles.push({
+        level: li,
+        tileId,
+        path: tileIdToPath(tileId, TILE_LEVELS[li].level),
+      });
+    }
+  }
+
+  console.log(`Country: collected ${allTiles.length} intersecting tiles out of ${totalCandidates} candidates`);
+
+  // Warn if very many tiles
+  if (allTiles.length > 5000) {
+    const proceed = confirm(`${countrySelectedEntry ? countrySelectedEntry.name : 'This region'} covers ${allTiles.length.toLocaleString()} tiles. Fetching sizes for all of them will take a while. Continue?`);
+    if (!proceed) {
+      hideProgress();
+      // Still render what we have on map
+      const levelTiles = new Map();
+      for (let li = 0; li < TILE_LEVELS.length; li++) {
+        const tiles = [];
+        for (const tileId of tileSets.get(li)) {
+          tiles.push({ tileId, path: tileIdToPath(tileId, TILE_LEVELS[li].level), size: null, missing: true });
+        }
+        tiles.sort((a, b) => a.path.localeCompare(b.path));
+        levelTiles.set(li, tiles);
+      }
+      lastTileData = levelTiles;
+      renderTileBboxesOnMap(levelTiles);
+      renderTileResults(levelTiles);
+      renderTileList(levelTiles);
+      return;
+    }
+  }
+
+  // Deduplicate by path
+  const uniqueTiles = [];
+  const seenPaths = new Set();
+  for (const tile of allTiles) {
+    if (!seenPaths.has(tile.path)) {
+      seenPaths.add(tile.path);
+      uniqueTiles.push(tile);
+    }
+  }
+
+  lastSelection.uniqueTiles = uniqueTiles;
+  lastSelection.tileSets = tileSets;
+
+  let sizeResults;
+  try {
+    sizeResults = await fetchTileSizes(uniqueTiles);
+  } catch (err) {
+    showError(`Failed to fetch tile sizes: ${err.message}`);
+    return;
+  }
+
+  applyResults(tileSets, sizeResults);
+}
+
+// Country search input handler
+elCountrySearch.addEventListener('input', () => {
+  renderCountryList(elCountrySearch.value);
+});
+
+// Focus handler: populate the list when focusing the search box
+elCountrySearch.addEventListener('focus', () => {
+  renderCountryList(elCountrySearch.value);
+});
+
+// ---------------------------------------------------------------------------
+// Distance limit slider event handler
+// ---------------------------------------------------------------------------
+elDistanceLimitSlider.addEventListener('input', () => {
+  const val = parseInt(elDistanceLimitSlider.value, 10);
+  elDistanceLimitValue.textContent = val === 0 ? 'off' : `${val} km`;
+
+  // If we have route data, recompute tiles with the new distance limit
+  if (routeData && getSelectedMode() === 'route') {
+    computeAndDisplayTiles();
+  }
+});
+
+// ---------------------------------------------------------------------------
+// Budget input event handler
+// ---------------------------------------------------------------------------
+document.getElementById('cache-budget').addEventListener('input', () => {
+  updateBudgetBar();
+  // If in additive mode and there's data, re-apply eviction
+  if (getCacheMode() === 'additive' && cacheAccumulator.size > 0) {
+    const budgetBytes = getCacheBudgetBytes();
+    if (budgetBytes > 0) {
+      // Re-apply FIFO eviction with new budget
+      const allEntries = [...cacheAccumulator.values()]
+        .filter(t => !t.missing)
+        .sort((a, b) => a.insertionOrder - b.insertionOrder);
+
+      let totalSize = allEntries.reduce((sum, t) => sum + (t.size || 0), 0);
+      let evictedCount = 0;
+
+      while (totalSize > budgetBytes && allEntries.length > 0) {
+        const oldest = allEntries.shift();
+        cacheAccumulator.delete(oldest.path);
+        totalSize -= (oldest.size || 0);
+        evictedCount++;
+      }
+
+      if (evictedCount > 0) {
+        elEvictionNotice.textContent = `Evicted ${evictedCount} oldest tile${evictedCount > 1 ? 's' : ''} to fit within budget.`;
+        elEvictionNotice.classList.add('visible');
+      } else {
+        elEvictionNotice.classList.remove('visible');
+      }
+
+      // Rebuild and re-render
+      const mergedLevelTiles = new Map();
+      for (let li = 0; li < TILE_LEVELS.length; li++) {
+        mergedLevelTiles.set(li, []);
+      }
+      for (const tile of cacheAccumulator.values()) {
+        mergedLevelTiles.get(tile.level).push({
+          tileId: tile.tileId,
+          path: tile.path,
+          size: tile.size,
+          missing: tile.missing,
+        });
+      }
+      for (let li = 0; li < TILE_LEVELS.length; li++) {
+        mergedLevelTiles.get(li).sort((a, b) => a.path.localeCompare(b.path));
+      }
+
+      lastTileData = mergedLevelTiles;
+      updateBudgetBar();
+      renderTileBboxesOnMap(mergedLevelTiles);
+      renderTileResults(mergedLevelTiles);
+      renderTileList(mergedLevelTiles);
+    }
+  }
+});
+
+// ---------------------------------------------------------------------------
+// Cache mode toggle event handler
+// ---------------------------------------------------------------------------
+document.querySelectorAll('input[name="cache-mode"]').forEach(radio => {
+  radio.addEventListener('change', () => {
+    const mode = getCacheMode();
+    if (mode === 'replace') {
+      // Switching to replace: clear the accumulator
+      cacheAccumulator.clear();
+      cacheInsertionCounter = 0;
+      elEvictionNotice.classList.remove('visible');
+    }
+    updateBudgetBar();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Encoding (compression) toggle event handler
+// ---------------------------------------------------------------------------
+document.querySelectorAll('input[name="encoding"]').forEach(radio => {
+  radio.addEventListener('change', async () => {
+    const checked = document.querySelector('input[name="encoding"]:checked');
+    currentEncoding = checked ? checked.value : 'zstd';
+    if (lastSelection.uniqueTiles && lastSelection.uniqueTiles.length && lastSelection.tileSets) {
+      let sizeResults;
+      try {
+        sizeResults = await fetchTileSizes(lastSelection.uniqueTiles);
+      } catch (err) {
+        showError(`Failed to fetch tile sizes: ${err.message}`);
+        return;
+      }
+      applyResults(lastSelection.tileSets, sizeResults);
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Initialize map layers on load
+// ---------------------------------------------------------------------------
+map.on('load', () => {
+  initRouteLayersOnMap();
+  initDistanceLimitLayers();
+  initSelectionPolygonLayer();
+  // Disable right-click map rotation globally — right-click is used for selection in all modes
+  map.dragRotate.disable();
+});
+
+// ---------------------------------------------------------------------------
+// Tile collection from route
+// ---------------------------------------------------------------------------
+
+/**
+ * Collect unique tile IDs at all 3 levels from an array of [lat, lon] points.
+ * Returns a Map of levelIndex -> Set of tileIds.
+ */
+function collectTilesFromPoints(pointsArray) {
+  const tileSets = new Map();
+  for (let li = 0; li < TILE_LEVELS.length; li++) {
+    tileSets.set(li, new Set());
+  }
+  for (const points of pointsArray) {
+    for (const [lat, lon] of points) {
+      for (let li = 0; li < TILE_LEVELS.length; li++) {
+        if (!isLevelEnabled(li)) continue;
+        tileSets.get(li).add(latLonToTileId(lat, lon, li));
+      }
+    }
+  }
+  return tileSets;
+}
+
+// ---------------------------------------------------------------------------
+// Tile size fetching via HEAD requests to rati
+// ---------------------------------------------------------------------------
+
+/**
+ * Fetch tile sizes via a single batch POST to our own backend.
+ * @param {Array<{level: number, tileId: number, path: string}>} tiles
+ * @returns {Promise<Map<string, {size: number|null, missing: boolean}>>}
+ *   Map from path -> { size (bytes or null), missing (true if 404) }
+ */
+async function fetchTileSizes(tiles) {
+  const results = new Map();
+  if (tiles.length === 0) return results;
+
+  showProgress(`Fetching tile sizes (${tiles.length}, ${currentEncoding})...`);
+
+  try {
+    const resp = await fetch('/api/tile-sizes', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        encoding: currentEncoding,
+        tiles: tiles.map(t => ({ level: t.level, id: t.tileId })),
+      }),
+    });
+    if (!resp.ok) {
+      const text = await resp.text().catch(() => '');
+      throw new Error(`HTTP ${resp.status}: ${text}`);
+    }
+    const data = await resp.json();
+    for (const entry of data.sizes || []) {
+      const path = tileIdToPath(entry.id, TILE_LEVELS[entry.level].level);
+      results.set(path, {
+        size: entry.missing ? null : (entry.bytes ?? 0),
+        missing: !!entry.missing,
+      });
+    }
+  } finally {
+    hideProgress();
+  }
+
+  return results;
+}
+
+/**
+ * Render a previously computed tileSets+sizeResults pair.
+ * Shared by the five call sites and by the encoding re-fetch path.
+ */
+function applyResults(tileSets, sizeResults) {
+  const levelTiles = new Map();
+  for (let li = 0; li < TILE_LEVELS.length; li++) {
+    const tiles = [];
+    const tileIds = tileSets.get(li);
+    if (tileIds) {
+      for (const tileId of tileIds) {
+        const path = tileIdToPath(tileId, TILE_LEVELS[li].level);
+        const info = sizeResults.get(path) || { size: null, missing: true };
+        tiles.push({ tileId, path, size: info.size, missing: info.missing });
+      }
+    }
+    tiles.sort((a, b) => a.path.localeCompare(b.path));
+    levelTiles.set(li, tiles);
+  }
+
+  const finalTiles = applyCacheMode(levelTiles);
+  renderTileBboxesOnMap(finalTiles);
+  renderTileResults(finalTiles);
+  renderTileList(finalTiles);
+}
+
+// ---------------------------------------------------------------------------
+// Tile bbox GeoJSON layers on the map
+// ---------------------------------------------------------------------------
+
+const TILE_LAYER_IDS = [
+  { sourceId: 'tile-bboxes-l0', fillId: 'tile-bboxes-l0-fill', lineId: 'tile-bboxes-l0-line' },
+  { sourceId: 'tile-bboxes-l1', fillId: 'tile-bboxes-l1-fill', lineId: 'tile-bboxes-l1-line' },
+  { sourceId: 'tile-bboxes-l2', fillId: 'tile-bboxes-l2-fill', lineId: 'tile-bboxes-l2-line' },
+];
+const MISSING_LAYER = { sourceId: 'tile-bboxes-missing', fillId: 'tile-bboxes-missing-fill', lineId: 'tile-bboxes-missing-line' };
+
+let tileBboxLayersInitialized = false;
+
+function initTileBboxLayers() {
+  if (tileBboxLayersInitialized) return;
+  tileBboxLayersInitialized = true;
+
+  // Per-level layers (added before route layers so they appear behind routes)
+  for (let li = 0; li < TILE_LEVELS.length; li++) {
+    const ids = TILE_LAYER_IDS[li];
+    const lvl = TILE_LEVELS[li];
+
+    map.addSource(ids.sourceId, {
+      type: 'geojson',
+      data: { type: 'FeatureCollection', features: [] },
+    });
+
+    // Fill layer
+    map.addLayer({
+      id: ids.fillId,
+      type: 'fill',
+      source: ids.sourceId,
+      paint: {
+        'fill-color': lvl.color,
+        'fill-opacity': lvl.fillOpacity,
+      },
+    }, 'route-alternatives-line'); // insert before route lines
+
+    // Line (stroke) layer
+    map.addLayer({
+      id: ids.lineId,
+      type: 'line',
+      source: ids.sourceId,
+      paint: {
+        'line-color': lvl.color,
+        'line-width': 1,
+        'line-opacity': 0.4,
+      },
+    }, 'route-alternatives-line');
+  }
+
+  // Missing tiles layer (gray, dashed)
+  map.addSource(MISSING_LAYER.sourceId, {
+    type: 'geojson',
+    data: { type: 'FeatureCollection', features: [] },
+  });
+
+  map.addLayer({
+    id: MISSING_LAYER.fillId,
+    type: 'fill',
+    source: MISSING_LAYER.sourceId,
+    paint: {
+      'fill-color': MISSING_STYLE.color,
+      'fill-opacity': MISSING_STYLE.fillOpacity,
+    },
+  }, 'route-alternatives-line');
+
+  map.addLayer({
+    id: MISSING_LAYER.lineId,
+    type: 'line',
+    source: MISSING_LAYER.sourceId,
+    paint: {
+      'line-color': MISSING_STYLE.color,
+      'line-width': 1.5,
+      'line-opacity': 0.5,
+      'line-dasharray': [4, 3],
+    },
+  }, 'route-alternatives-line');
+
+  // Tile highlight layer (for sidebar click-to-highlight)
+  map.addSource('tile-highlight', {
+    type: 'geojson',
+    data: { type: 'FeatureCollection', features: [] },
+  });
+
+  map.addLayer({
+    id: 'tile-highlight-fill',
+    type: 'fill',
+    source: 'tile-highlight',
+    paint: {
+      'fill-color': '#ffff00',
+      'fill-opacity': 0.35,
+    },
+  });
+
+  map.addLayer({
+    id: 'tile-highlight-line',
+    type: 'line',
+    source: 'tile-highlight',
+    paint: {
+      'line-color': '#ffcc00',
+      'line-width': 3,
+      'line-opacity': 0.9,
+    },
+  });
+}
+
+/**
+ * Highlight a specific tile on the map by its tileId and level index.
+ * Optionally fits the map to the tile's bounds.
+ */
+function highlightTileOnMap(tileId, levelIndex, fitBounds = true) {
+  initTileBboxLayers();
+
+  const bbox = tileIdToBbox(tileId, levelIndex);
+  const coords = bboxToGeoJSONCoords(bbox);
+
+  map.getSource('tile-highlight').setData({
+    type: 'FeatureCollection',
+    features: [{
+      type: 'Feature',
+      geometry: { type: 'Polygon', coordinates: coords },
+      properties: {},
+    }],
+  });
+
+  if (fitBounds) {
+    map.fitBounds(
+      [[bbox.west, bbox.south], [bbox.east, bbox.north]],
+      { padding: 40, maxZoom: 14, duration: 500 }
+    );
+  }
+}
+
+/**
+ * Clear the tile highlight from the map.
+ */
+function clearTileHighlight() {
+  if (tileBboxLayersInitialized && map.getSource('tile-highlight')) {
+    map.getSource('tile-highlight').setData({ type: 'FeatureCollection', features: [] });
+  }
+}
+
+/**
+ * Render tile bbox polygons on the map.
+ * @param {Map<number, Array<{tileId, path, size, missing}>>} levelTiles
+ */
+function renderTileBboxesOnMap(levelTiles) {
+  initTileBboxLayers();
+
+  const missingFeatures = [];
+
+  for (let li = 0; li < TILE_LEVELS.length; li++) {
+    const tiles = levelTiles.get(li) || [];
+    const ids = TILE_LAYER_IDS[li];
+
+    const features = [];
+    for (const tile of tiles) {
+      const bbox = tileIdToBbox(tile.tileId, li);
+      const coords = bboxToGeoJSONCoords(bbox);
+      if (tile.missing) {
+        missingFeatures.push({
+          type: 'Feature',
+          geometry: { type: 'Polygon', coordinates: coords },
+          properties: { path: tile.path, level: li },
+        });
+      } else {
+        features.push({
+          type: 'Feature',
+          geometry: { type: 'Polygon', coordinates: coords },
+          properties: { path: tile.path, size: tile.size },
+        });
+      }
+    }
+
+    map.getSource(ids.sourceId).setData({
+      type: 'FeatureCollection',
+      features,
+    });
+  }
+
+  map.getSource(MISSING_LAYER.sourceId).setData({
+    type: 'FeatureCollection',
+    features: missingFeatures,
+  });
+}
+
+/**
+ * Clear tile bbox layers from the map.
+ */
+function clearTileBboxesFromMap() {
+  if (!tileBboxLayersInitialized) return;
+  for (let li = 0; li < TILE_LEVELS.length; li++) {
+    const ids = TILE_LAYER_IDS[li];
+    if (map.getSource(ids.sourceId)) {
+      map.getSource(ids.sourceId).setData({ type: 'FeatureCollection', features: [] });
+    }
+  }
+  if (map.getSource(MISSING_LAYER.sourceId)) {
+    map.getSource(MISSING_LAYER.sourceId).setData({ type: 'FeatureCollection', features: [] });
+  }
+  clearTileHighlight();
+}
+
+// ---------------------------------------------------------------------------
+// Sidebar results display
+// ---------------------------------------------------------------------------
+
+/**
+ * Render per-level and total tile summary in the sidebar.
+ * @param {Map<number, Array<{tileId, path, size, missing}>>} levelTiles
+ */
+function renderTileResults(levelTiles) {
+  let totalSize = 0;
+  let totalCount = 0;
+  let totalMissing = 0;
+
+  let summaryHtml = '';
+
+  for (let li = 0; li < TILE_LEVELS.length; li++) {
+    const lvl = TILE_LEVELS[li];
+    const tiles = levelTiles.get(li) || [];
+    const presentTiles = tiles.filter(t => !t.missing);
+    const missingTiles = tiles.filter(t => t.missing);
+    const levelSize = presentTiles.reduce((sum, t) => sum + (t.size || 0), 0);
+
+    totalSize += levelSize;
+    totalCount += tiles.length;
+    totalMissing += missingTiles.length;
+
+    const missingStr = missingTiles.length > 0
+      ? ` (${missingTiles.length} missing)`
+      : '';
+
+    summaryHtml += `
+      <div class="level-row">
+        <div class="level-dot l${li}"></div>
+        <span>Level ${li} (${lvl.label}): ${tiles.length} tiles, ${formatBytes(levelSize)}${missingStr}</span>
+      </div>
+    `;
+  }
+
+  const missingTotalStr = totalMissing > 0 ? ` (${totalMissing} missing)` : '';
+  summaryHtml += `
+    <div class="total-row">
+      Total: ${totalCount} tiles, ${formatBytes(totalSize)}${missingTotalStr}
+    </div>
+  `;
+
+  elResultsSummary.innerHTML = summaryHtml;
+  elResultsSection.style.display = 'block';
+}
+
+/**
+ * Render collapsible tile list in the sidebar.
+ * @param {Map<number, Array<{tileId, path, size, missing}>>} levelTiles
+ */
+function renderTileList(levelTiles) {
+  let html = '';
+
+  for (let li = 0; li < TILE_LEVELS.length; li++) {
+    const lvl = TILE_LEVELS[li];
+    const tiles = levelTiles.get(li) || [];
+    if (tiles.length === 0) continue;
+
+    const levelId = `tile-level-${li}`;
+
+    html += `<div class="level-section">`;
+    html += `<div class="level-header" onclick="toggleTileLevel('${levelId}')">`;
+    html += `<span class="toggle-arrow" id="arrow-${levelId}">&#9654;</span>`;
+    html += `<div class="level-dot l${li}"></div>`;
+    html += `<span>Level ${li} (${lvl.label}) &mdash; ${tiles.length} tiles</span>`;
+    html += `</div>`;
+    html += `<div class="level-tiles" id="${levelId}">`;
+
+    // Sort tiles: present first, then missing
+    const sorted = [...tiles].sort((a, b) => {
+      if (a.missing !== b.missing) return a.missing ? 1 : -1;
+      return a.path.localeCompare(b.path);
+    });
+
+    for (const tile of sorted) {
+      const cls = tile.missing ? 'tile-item missing clickable' : 'tile-item clickable';
+      const sizeStr = tile.missing ? '404' : formatBytes(tile.size || 0);
+      html += `<div class="${cls}" data-tile-id="${tile.tileId}" data-level="${li}" onclick="onTileItemClick(this, ${tile.tileId}, ${li})"><span>${tile.path}</span><span>${sizeStr}</span></div>`;
+    }
+
+    html += `</div></div>`;
+  }
+
+  elTileList.innerHTML = html;
+  elTileListSection.style.display = 'block';
+}
+
+/** Currently highlighted tile item element */
+let highlightedTileItem = null;
+
+/**
+ * Handle click on a tile item in the sidebar list.
+ * Highlights the tile on the map and in the sidebar.
+ */
+function onTileItemClick(el, tileId, levelIndex) {
+  // Remove previous highlight
+  if (highlightedTileItem) {
+    highlightedTileItem.classList.remove('highlighted');
+  }
+
+  // If clicking the same tile, toggle off
+  if (highlightedTileItem === el) {
+    highlightedTileItem = null;
+    clearTileHighlight();
+    return;
+  }
+
+  // Highlight the new tile
+  el.classList.add('highlighted');
+  highlightedTileItem = el;
+  highlightTileOnMap(tileId, levelIndex);
+}
+
+// Make onTileItemClick accessible from inline onclick
+window.onTileItemClick = onTileItemClick;
+
+/**
+ * Toggle a collapsible tile level section.
+ */
+function toggleTileLevel(levelId) {
+  const el = document.getElementById(levelId);
+  const arrow = document.getElementById('arrow-' + levelId);
+  if (el.classList.contains('open')) {
+    el.classList.remove('open');
+    arrow.classList.remove('open');
+  } else {
+    el.classList.add('open');
+    arrow.classList.add('open');
+  }
+}
+
+// Make toggleTileLevel accessible from inline onclick
+window.toggleTileLevel = toggleTileLevel;
+
+// Store the last computed tile data for JSON export
+let lastTileData = null;
+
+// ---------------------------------------------------------------------------
+// Full tile computation + fetching pipeline
+// ---------------------------------------------------------------------------
+
+/**
+ * After routing completes, collect tiles from route polyline(s),
+ * fetch their sizes from rati, and display results.
+ * Respects distance limit and cache mode.
+ */
+async function computeAndDisplayTiles() {
+  if (!routeData) return;
+
+  hideError();
+
+  const distanceLimitKm = getDistanceLimitKm();
+
+  // Apply distance limit to main route if set
+  let mainPoints = routeData.main;
+  if (distanceLimitKm > 0) {
+    const { within, beyond, cutoffPoint } = splitPolylineAtDistance(routeData.main, distanceLimitKm);
+    mainPoints = within;
+
+    // Update distance limit info
+    const totalDist = polylineLength(routeData.main);
+    elDistanceLimitInfo.textContent = `Collecting tiles for first ${distanceLimitKm} km of ${totalDist.toFixed(0)} km route`;
+
+    // Render distance limit visualization
+    renderDistanceLimitOnMap(routeData.main, distanceLimitKm);
+  } else {
+    elDistanceLimitInfo.textContent = '';
+    clearDistanceLimitLayers();
+  }
+
+  // Collect all polylines (distance-limited main + alternatives)
+  // Note: alternatives are not distance-limited (they contribute additional tile coverage)
+  const allPolylines = [mainPoints];
+  if (routeData.alternatives) {
+    allPolylines.push(...routeData.alternatives);
+  }
+
+  // Collect unique tiles at each level
+  const tileSets = collectTilesFromPoints(allPolylines);
+
+  // Build flat list of tiles for HEAD requests
+  const allTiles = [];
+  for (let li = 0; li < TILE_LEVELS.length; li++) {
+    const tileIds = tileSets.get(li);
+    for (const tileId of tileIds) {
+      allTiles.push({
+        level: li,
+        tileId,
+        path: tileIdToPath(tileId, TILE_LEVELS[li].level),
+      });
+    }
+  }
+
+  console.log(`Collected ${allTiles.length} unique tiles across ${TILE_LEVELS.length} levels`);
+
+  // Deduplicate by path (different levels can't share paths, but just to be safe)
+  const uniqueTiles = [];
+  const seenPaths = new Set();
+  for (const tile of allTiles) {
+    if (!seenPaths.has(tile.path)) {
+      seenPaths.add(tile.path);
+      uniqueTiles.push(tile);
+    }
+  }
+
+  lastSelection.uniqueTiles = uniqueTiles;
+  lastSelection.tileSets = tileSets;
+
+  let sizeResults;
+  try {
+    sizeResults = await fetchTileSizes(uniqueTiles);
+  } catch (err) {
+    showError(`Failed to fetch tile sizes: ${err.message}`);
+    return;
+  }
+
+  applyResults(tileSets, sizeResults);
+}
+
+// ---------------------------------------------------------------------------
+// Copy as JSON button
+// ---------------------------------------------------------------------------
+document.getElementById('btn-copy-json').addEventListener('click', () => {
+  if (!lastTileData) {
+    showError('No tile data to copy. Compute tiles first.');
+    return;
+  }
+
+  const exportData = {};
+  let totalSize = 0;
+  let totalCount = 0;
+  let totalMissing = 0;
+
+  for (let li = 0; li < TILE_LEVELS.length; li++) {
+    const lvl = TILE_LEVELS[li];
+    const tiles = lastTileData.get(li) || [];
+    const levelData = tiles.map(t => ({
+      path: t.path,
+      tileId: t.tileId,
+      size: t.size,
+      missing: t.missing,
+    }));
+
+    const presentTiles = tiles.filter(t => !t.missing);
+    const levelSize = presentTiles.reduce((sum, t) => sum + (t.size || 0), 0);
+
+    exportData[`level_${li}`] = {
+      label: lvl.label,
+      count: tiles.length,
+      missing: tiles.filter(t => t.missing).length,
+      totalBytes: levelSize,
+      totalFormatted: formatBytes(levelSize),
+      tiles: levelData,
+    };
+
+    totalSize += levelSize;
+    totalCount += tiles.length;
+    totalMissing += tiles.filter(t => t.missing).length;
+  }
+
+  exportData.total = {
+    count: totalCount,
+    missing: totalMissing,
+    totalBytes: totalSize,
+    totalFormatted: formatBytes(totalSize),
+  };
+
+  const json = JSON.stringify(exportData, null, 2);
+  navigator.clipboard.writeText(json).then(() => {
+    console.log('Tile data copied to clipboard');
+    // Brief visual feedback
+    const btn = document.getElementById('btn-copy-json');
+    const orig = btn.textContent;
+    btn.textContent = 'Copied!';
+    setTimeout(() => { btn.textContent = orig; }, 1500);
+  }).catch(err => {
+    showError(`Failed to copy: ${err.message}`);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Expose utilities on window for console testing
+// ---------------------------------------------------------------------------
+window.tileMath = {
+  latLonToTileId,
+  tileIdToBbox,
+  tileIdToPath,
+  tilesForPoint,
+  bboxToGeoJSONCoords,
+  decodePolyline6,
+  equirectangularDistance,
+  polylineLength,
+  formatBytes,
+  isLevelEnabled,
+  getEnabledLevels,
+  TILE_LEVELS,
+};
+
+window.routing = {
+  requestRoute,
+  decodeTrip,
+  performRouting,
+  computeAndDisplayTiles,
+  collectTilesFromPoints,
+  collectTilesFromBbox,
+  computeAndDisplayTilesForBbox,
+  computeAndDisplayTilesForRadius,
+  updateRadiusCircle,
+  computeAndDisplayTilesForPolygon,
+  computeAndDisplayTilesForCountry,
+  parsePolyFormat,
+  selectCountry,
+  fetchTileSizes,
+  splitPolylineAtDistance,
+  get routeData() { return routeData; },
+  get lastTileData() { return lastTileData; },
+  get bboxRect() { return bboxRect; },
+  get radiusCenterLatLon() { return radiusCenterLatLon; },
+  get radiusCirclePoly() { return radiusCirclePoly; },
+  get polygonVertices() { return polygonVertices; },
+  get polygonClosed() { return polygonClosed; },
+  get countrySelectedEntry() { return countrySelectedEntry; },
+  get countryPolygonGeoJSON() { return countryPolygonGeoJSON; },
+  get cacheAccumulator() { return cacheAccumulator; },
+  getCacheMode,
+  getCacheBudgetBytes,
+  getDistanceLimitKm,
+};
+
+// Quick self-test logged to console
+console.log('--- Valhalla Tile Sizer: self-test ---');
+
+// Test tile math: Malmo (55.6, 13.0)
+const testLat = 55.6, testLon = 13.0;
+for (let li = 0; li < TILE_LEVELS.length; li++) {
+  const id = latLonToTileId(testLat, testLon, li);
+  const bbox = tileIdToBbox(id, li);
+  const path = tileIdToPath(id, TILE_LEVELS[li].level);
+  console.log(`Level ${li}: tileId=${id}, path=${path}, bbox=[${bbox.south.toFixed(2)},${bbox.west.toFixed(2)},${bbox.north.toFixed(2)},${bbox.east.toFixed(2)}]`);
+}
+
+// Test polyline6 decode (short encoded segment near Malmo)
+const testEncoded = '_sqkiB_iyxR??_seK?';
+const testDecoded = decodePolyline6(testEncoded);
+console.log('Polyline6 decode test:', testDecoded.length, 'points, first:', testDecoded[0]);
+
+// Test distance (Malmo to Lund, ~18km)
+const distML = equirectangularDistance(55.6050, 13.0038, 55.7047, 13.1910);
+console.log('Malmo-Lund distance:', distML.toFixed(1), 'km (expected ~15-20km)');
+
+console.log('--- self-test complete ---');
+</script>
+</body>
+</html>

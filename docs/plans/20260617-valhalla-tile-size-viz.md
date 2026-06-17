@@ -247,14 +247,14 @@ struct CacheKey {
 - Create: `web/poly/` (copy whole directory)
 - Create: `tests/serve_html.rs`
 
-- [ ] copy `../sar-tiles-viz/web/{index.html,countries.js,poly-data.js,poly/}` verbatim
-- [ ] remove the rati-url input from the sidebar (search for `rati-url` in the HTML) and any JS reading `document.getElementById('rati-url').value`
-- [ ] add a compression selector — radio group `identity` / `gzip` / `zstd` (default `zstd`) bound to a top-level `currentEncoding` variable
-- [ ] introduce a `lastSelection = { mode, uniqueTiles }` global that the five existing call sites of `fetchTileSizes` (bbox 2129, route 2278, polygon 2572, country 3004, route-mode 3641) populate after computing `uniqueTiles`. On encoding-radio change, re-call `fetchTileSizes(lastSelection.uniqueTiles)` if it's set and re-render — no need to re-run the whole `recompute*` pipeline.
-- [ ] replace `fetchTileSizes(tiles, concurrency)` body with a single `POST /api/tile-sizes` that sends `{ encoding: currentEncoding, tiles: tiles.map(t => ({ level: t.level, id: t.tileId })) }`. Map the response array back to the existing `Map<path, {size, missing}>` shape so callers don't change.
-- [ ] update the page `<title>` to `"Valhalla Tile Size Visualizer"` and the sidebar `<h1>` accordingly
-- [ ] add `tests/serve_html.rs`: spin up the Router with a stub `RatiClient` (no rati needed), `oneshot` `GET /`, assert 200 + non-empty body. This test only exercises static serving — no upstream calls.
-- [ ] `cargo test` must pass; manual browser check: bbox a small region, see sizes render under all three encodings; toggling the radio re-fetches and re-renders without redrawing the selection
+- [x] copy `../sar-tiles-viz/web/{index.html,countries.js,poly-data.js,poly/}` verbatim
+- [x] remove the rati-url input from the sidebar (search for `rati-url` in the HTML) and any JS reading `document.getElementById('rati-url').value`
+- [x] add a compression selector — radio group `identity` / `gzip` / `zstd` (default `zstd`) bound to a top-level `currentEncoding` variable
+- [x] introduce a `lastSelection = { mode, uniqueTiles }` global that the five existing call sites of `fetchTileSizes` (bbox 2129, route 2278, polygon 2572, country 3004, route-mode 3641) populate after computing `uniqueTiles`. On encoding-radio change, re-call `fetchTileSizes(lastSelection.uniqueTiles)` if it's set and re-render — no need to re-run the whole `recompute*` pipeline.
+- [x] replace `fetchTileSizes(tiles, concurrency)` body with a single `POST /api/tile-sizes` that sends `{ encoding: currentEncoding, tiles: tiles.map(t => ({ level: t.level, id: t.tileId })) }`. Map the response array back to the existing `Map<path, {size, missing}>` shape so callers don't change.
+- [x] update the page `<title>` to `"Valhalla Tile Size Visualizer"` and the sidebar `<h1>` accordingly
+- [x] add `tests/serve_html.rs`: spin up the Router with a stub `RatiClient` (no rati needed), `oneshot` `GET /`, assert 200 + non-empty body. This test only exercises static serving — no upstream calls.
+- [x] `cargo test` must pass; manual browser check: bbox a small region, see sizes render under all three encodings; toggling the radio re-fetches and re-renders without redrawing the selection (manual browser check pending Task 9)
 
 ### Task 8: README cleanup
 

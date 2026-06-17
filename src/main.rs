@@ -1,24 +1,11 @@
 use std::{num::NonZero, sync::Arc};
 
-use axum::{
-    Router,
-    http::StatusCode,
-    response::Html,
-    routing::{get, post},
-};
 use clap::Parser;
-use tokio::{fs::File, io::AsyncReadExt, signal};
+use tokio::signal;
 use tower_http::trace::TraceLayer;
 use tracing::info;
 
-mod api;
-mod cache;
-mod tiles;
-mod upstream;
-
-use api::{AppState, tile_sizes};
-use cache::SizeCache;
-use upstream::RatiClient;
+use valhalla_size_viz::{AppState, RatiClient, SizeCache, build_router};
 
 #[derive(Parser, Debug)]
 #[command(version, about)]
@@ -61,12 +48,7 @@ async fn run(config: Config) {
         concurrency: config.concurrency as usize,
     };
 
-    let app = Router::new()
-        .route("/", get(serve_index_html))
-        .route("/api/tile-sizes", post(tile_sizes))
-        .route("/healthz", get(healthz))
-        .with_state(state)
-        .layer(TraceLayer::new_for_http());
+    let app = build_router(state).layer(TraceLayer::new_for_http());
 
     let listener = tokio::net::TcpListener::bind(("0.0.0.0", config.port))
         .await
@@ -100,43 +82,13 @@ async fn shutdown_signal() {
     }
 }
 
-async fn serve_index_html() -> Result<Html<String>, (StatusCode, String)> {
-    let index_html = "web/index.html";
-    let Ok(mut file) = File::open(index_html).await else {
-        return Err((
-            StatusCode::NOT_FOUND,
-            format!("Failed to open {index_html}: not found"),
-        ));
-    };
-
-    let mut contents = String::new();
-    if let Err(err) = file.read_to_string(&mut contents).await {
-        return Err((
-            StatusCode::INTERNAL_SERVER_ERROR,
-            format!("Failed to read {index_html}: {err}"),
-        ));
-    }
-
-    Ok(Html(contents))
-}
-
-async fn healthz() -> &'static str {
-    "OK"
-}
-
-#[cfg(test)]
-fn build_router(state: AppState) -> Router {
-    Router::new()
-        .route("/", get(serve_index_html))
-        .route("/api/tile-sizes", post(tile_sizes))
-        .route("/healthz", get(healthz))
-        .with_state(state)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-    use axum::{body::Body, http::Request};
+    use axum::{
+        body::Body,
+        http::{Request, StatusCode},
+    };
     use pretty_assertions::assert_eq;
     use tower::ServiceExt;
 
