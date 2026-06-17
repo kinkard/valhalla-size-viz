@@ -2915,29 +2915,6 @@ async function computeAndDisplayTilesForCountry() {
 
   console.log(`Country: collected ${allTiles.length} intersecting tiles out of ${totalCandidates} candidates`);
 
-  // Warn if very many tiles
-  if (allTiles.length > 5000) {
-    const proceed = confirm(`${countrySelectedEntry ? countrySelectedEntry.name : 'This region'} covers ${allTiles.length.toLocaleString()} tiles. Fetching sizes for all of them will take a while. Continue?`);
-    if (!proceed) {
-      hideProgress();
-      // Still render what we have on map
-      const levelTiles = new Map();
-      for (let li = 0; li < TILE_LEVELS.length; li++) {
-        const tiles = [];
-        for (const tileId of tileSets.get(li)) {
-          tiles.push({ tileId, path: tileIdToPath(tileId, TILE_LEVELS[li].level), size: null, missing: true });
-        }
-        tiles.sort((a, b) => a.path.localeCompare(b.path));
-        levelTiles.set(li, tiles);
-      }
-      lastTileData = levelTiles;
-      renderTileBboxesOnMap(levelTiles);
-      renderTileResults(levelTiles);
-      renderTileList(levelTiles);
-      return;
-    }
-  }
-
   // Deduplicate by path
   const uniqueTiles = [];
   const seenPaths = new Set();

@@ -30,14 +30,6 @@ const UPSTREAM_TIMEOUT: Duration = Duration::from_secs(30);
 /// `countries.js`, `poly-data.js`, and the `poly/` GeoJSON tree.
 const WEB_DIR: &str = "web";
 
-/// 4 MiB comfortably fits MAX_BATCH_SIZE tiles (~25 bytes each) with headroom.
-const REQUEST_BODY_LIMIT: usize = 4 * 1024 * 1024;
-
-/// Soft cap on tiles per batch — fits inside REQUEST_BODY_LIMIT and prevents
-/// accidental runaway fetches. Country-mode level-2 selections are in the low
-/// thousands, so 20k is comfortable.
-const MAX_BATCH_SIZE: usize = 20_000;
-
 /// Valhalla graph tile grids: level 0 = highway (4° tiles, 90×45),
 /// level 1 = arterial (1°, 360×180), level 2 = local (0.25°, 1440×720).
 /// Tile IDs are row-major (id = row*cols + col); max_tile_id = cols*rows - 1.
@@ -315,17 +307,6 @@ async fn tile_sizes(
     State(state): State<AppState>,
     Json(req): Json<TileSizesRequest>,
 ) -> Result<Response, (StatusCode, String)> {
-    if req.tiles.len() > MAX_BATCH_SIZE {
-        return Err((
-            StatusCode::BAD_REQUEST,
-            format!(
-                "batch size {} exceeds maximum {}",
-                req.tiles.len(),
-                MAX_BATCH_SIZE
-            ),
-        ));
-    }
-
     let encoding = req.encoding;
     let n = req.tiles.len();
     let mut results: Vec<Option<TileSize>> = (0..n).map(|_| None).collect();
@@ -448,7 +429,7 @@ fn build_router(state: AppState) -> Router {
         .route("/", get(serve_index))
         .route(
             "/api/tile-sizes",
-            post(tile_sizes).layer(DefaultBodyLimit::max(REQUEST_BODY_LIMIT)),
+            post(tile_sizes).layer(DefaultBodyLimit::disable()),
         )
         .route("/health", get(health))
         // Fallback covers countries.js, poly-data.js, and the poly/ tree.
@@ -878,7 +859,7 @@ mod tests {
         Router::new()
             .route(
                 "/api/tile-sizes",
-                post(tile_sizes).layer(DefaultBodyLimit::max(REQUEST_BODY_LIMIT)),
+                post(tile_sizes).layer(DefaultBodyLimit::disable()),
             )
             .with_state(state)
     }
@@ -1028,17 +1009,6 @@ mod tests {
                 .map(|v| *v.value()),
             Some(None)
         );
-    }
-
-    #[tokio::test]
-    async fn oversized_batch_rejected_with_400() {
-        let server = MockServer::start().await;
-        let state = test_state(&server.uri(), 4);
-        let tiles: Vec<Value> = (0..(MAX_BATCH_SIZE + 1))
-            .map(|i| json!({ "level": 2, "id": i as u32 }))
-            .collect();
-        let (status, _) = call(router(state), json!({ "encoding": "zstd", "tiles": tiles })).await;
-        assert_eq!(status, StatusCode::BAD_REQUEST);
     }
 
     #[tokio::test]
