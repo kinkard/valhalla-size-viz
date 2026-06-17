@@ -55,7 +55,7 @@ The single endpoint backs the UI; documented here in case you want to script it.
 }
 ```
 
-Other endpoints: `GET /` serves the UI, `GET /healthz` returns `"OK"`, and the `web/` directory (`countries.js`, `poly-data.js`, `poly/*.json`) is served as static files. A batch larger than 20,000 tiles is rejected with `400 Bad Request`.
+Other endpoints: `GET /` serves the UI, `GET /health` returns `"OK"`, and the `web/` directory (`countries.js`, `poly-data.js`, `poly/*.poly`) is served as static files. A batch larger than 20,000 tiles is rejected with `400 Bad Request`.
 
 ## Build & Run
 
