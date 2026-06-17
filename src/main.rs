@@ -17,7 +17,7 @@ struct Config {
     #[arg(long, default_value_t = 32)]
     concurrency: u16,
     /// rati base URL (e.g. http://localhost:8050)
-    #[arg(long, env = "RATI_URL")]
+    #[arg(long)]
     rati_url: String,
 }
 

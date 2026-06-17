@@ -15,7 +15,7 @@ Usage: valhalla-size-viz [OPTIONS] --rati-url <RATI_URL>
 Options:
       --port <PORT>                Port to listen on [default: 3000]
       --concurrency <CONCURRENCY>  Max concurrent upstream fetches to rati [default: 32]
-      --rati-url <RATI_URL>        rati base URL (e.g. http://localhost:8050) [env: RATI_URL=]
+      --rati-url <RATI_URL>        rati base URL (e.g. http://localhost:8050)
   -h, --help                       Print help
   -V, --version                    Print version
 ```
