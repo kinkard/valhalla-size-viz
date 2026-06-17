@@ -17,5 +17,9 @@ RUN touch -a -m ./src/main.rs
 RUN cargo build --release
 
 FROM alpine AS runtime
-COPY --from=builder /usr/src/app/target/release/valhalla-size-viz /usr/local/bin/valhalla-size-viz
-CMD ["valhalla-size-viz"]
+# reqwest+rustls needs the system CA bundle to verify https rati backends
+RUN apk add --no-cache ca-certificates
+WORKDIR /usr
+COPY web ./web
+COPY --from=builder /usr/src/app/target/release/valhalla-size-viz /usr/local/bin/
+ENTRYPOINT ["valhalla-size-viz"]

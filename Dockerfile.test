@@ -10,7 +10,7 @@ WORKDIR /usr/src/app
 # First build a dummy target to cache dependencies in a separate Docker layer
 COPY Cargo.toml Cargo.lock ./
 RUN mkdir src && echo 'fn main() { println!("Dummy image called!"); }' > src/main.rs
-RUN cargo build
+RUN cargo build --release
 
 COPY src ./src
 # Update modified attribute as otherwise cargo won't rebuild anything
@@ -19,6 +19,6 @@ RUN touch -a -m ./src/main.rs
 # Check formatting before building to avoid unnecessary rebuilds
 RUN cargo fmt --all -- --check
 
-RUN cargo clippy -- -Dwarnings
+RUN cargo clippy --release -- -Dwarnings
 
-RUN cargo test
+RUN cargo test --release

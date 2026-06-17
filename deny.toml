@@ -94,6 +94,10 @@ allow = [
     "Apache-2.0 WITH LLVM-exception",
     "BSD-2-Clause",
     "BSD-3-Clause",
+    "ISC",         # ring
+    "Unicode-3.0", # icu_*
+    "Zlib",
+    "MPL-2.0",     # potential transitive dep
 ]
 unused-allowed-license = "allow"
 # The confidence threshold for detecting a license from license text.

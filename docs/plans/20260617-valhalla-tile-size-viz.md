@@ -151,13 +151,13 @@ struct CacheKey {
 - Modify: `.github/workflows/push_docker_image.yml`
 - Modify: `deny.toml`
 
-- [ ] update `Dockerfile` (stay on alpine): two-stage `rust:alpine` builder → `alpine` runtime. Keep existing dummy-`main.rs` dep-caching trick. Add to the runtime stage: `RUN apk add --no-cache ca-certificates` (reqwest+rustls needs the cert bundle), `WORKDIR /usr`, `COPY web ./web`, `COPY --from=builder /usr/src/app/target/release/valhalla-size-viz /usr/local/bin/`, `ENTRYPOINT ["valhalla-size-viz"]` (replace the current `CMD` form so flags work cleanly).
-- [ ] update `Dockerfile.test` (stay on alpine): switch the build commands from `cargo build` to `cargo build --release` so we test the same compilation profile we ship. Keep `cargo fmt -- --check`, `cargo clippy -- -Dwarnings`, `cargo test`. Keep the dummy-`main.rs` dep-caching trick.
-- [ ] delete `.github/workflows/publish.yml` (user decision — no crates.io publishing for now)
-- [ ] update `.github/workflows/push_docker_image.yml`: replace `{{username}}/{{project-name}}:latest` with `kinkard/valhalla-size-viz:latest`. Keep `linux/arm64` platform (matches runner) — note this in the README so users know the published image is arm64-only.
-- [ ] update `deny.toml`'s `[licenses] allow` list to include `ISC` (ring), `Unicode-3.0` (icu_*), `Zlib`, `MPL-2.0` (in case any transitive uses it). Not running cargo-deny in CI but keeping it sane for local checks.
-- [ ] verify: `docker build .` succeeds; `docker build -f Dockerfile.test .` runs fmt/clippy/test in container
-- [ ] no Rust tests added (config-only task)
+- [x] update `Dockerfile` (stay on alpine): two-stage `rust:alpine` builder → `alpine` runtime. Keep existing dummy-`main.rs` dep-caching trick. Add to the runtime stage: `RUN apk add --no-cache ca-certificates` (reqwest+rustls needs the cert bundle), `WORKDIR /usr`, `COPY web ./web`, `COPY --from=builder /usr/src/app/target/release/valhalla-size-viz /usr/local/bin/`, `ENTRYPOINT ["valhalla-size-viz"]` (replace the current `CMD` form so flags work cleanly).
+- [x] update `Dockerfile.test` (stay on alpine): switch the build commands from `cargo build` to `cargo build --release` so we test the same compilation profile we ship. Keep `cargo fmt -- --check`, `cargo clippy -- -Dwarnings`, `cargo test`. Keep the dummy-`main.rs` dep-caching trick.
+- [x] delete `.github/workflows/publish.yml` (user decision — no crates.io publishing for now)
+- [x] update `.github/workflows/push_docker_image.yml`: replace `{{username}}/{{project-name}}:latest` with `kinkard/valhalla-size-viz:latest`. Keep `linux/arm64` platform (matches runner) — note this in the README so users know the published image is arm64-only.
+- [x] update `deny.toml`'s `[licenses] allow` list to include `ISC` (ring), `Unicode-3.0` (icu_*), `Zlib`, `MPL-2.0` (in case any transitive uses it). Not running cargo-deny in CI but keeping it sane for local checks.
+- [x] verify: `docker build .` succeeds; `docker build -f Dockerfile.test .` runs fmt/clippy/test in container (skipped - no docker daemon available; verified by Dockerfile inspection)
+- [x] no Rust tests added (config-only task)
 
 ### Task 2: Tile types and path encoding
 
