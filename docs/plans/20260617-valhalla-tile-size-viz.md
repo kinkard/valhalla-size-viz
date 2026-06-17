@@ -165,14 +165,14 @@ struct CacheKey {
 - Create: `src/tiles.rs`
 - Modify: `src/main.rs` (add `mod tiles;`)
 
-- [ ] define `Encoding` enum (`Identity` | `Gzip` | `Zstd`) with `as_header_value()` returning `"identity"`/`"gzip"`/`"zstd"` and a serde `Deserialize` impl that accepts lowercase strings
-- [ ] define `TileId { level: u8, id: u32 }` with `to_path() -> String` producing `"<level>/<id/1000:03>/<id%1000:03>.gph"`
-- [ ] add a `LEVELS` constants table (with comment) holding `(size_deg, cols, rows, max_tile_id)` for levels 0/1/2 — used by `TileId::validate()`
-- [ ] `TileId::validate()` rejects `level > 2` and `id > LEVELS[level].max_tile_id`
-- [ ] write tests: `to_path` round-trip for known cases (level 2 id 818660 → `"2/000/818/660.gph"`, level 0 id 529 → `"0/000/529.gph"`)
-- [ ] write tests: `Encoding::deserialize` for `"identity"`, `"gzip"`, `"zstd"`, reject `"br"` and uppercase
-- [ ] write tests: `validate()` rejects out-of-range level and id, accepts boundary values
-- [ ] `cargo test` must pass
+- [x] define `Encoding` enum (`Identity` | `Gzip` | `Zstd`) with `as_header_value()` returning `"identity"`/`"gzip"`/`"zstd"` and a serde `Deserialize` impl that accepts lowercase strings
+- [x] define `TileId { level: u8, id: u32 }` with `to_path() -> String` producing `"<level>/<id/1000:03>/<id%1000:03>.gph"`
+- [x] add a `LEVELS` constants table (with comment) holding `(size_deg, cols, rows, max_tile_id)` for levels 0/1/2 — used by `TileId::validate()`
+- [x] `TileId::validate()` rejects `level > 2` and `id > LEVELS[level].max_tile_id`
+- [x] write tests: `to_path` round-trip for known cases (level 2 id 818660 → `"2/818/660.gph"` [plan originally said `"2/000/818/660.gph"`, a typo — corrected to match the JS reference], level 0 id 529 → `"0/000/529.gph"`)
+- [x] write tests: `Encoding::deserialize` for `"identity"`, `"gzip"`, `"zstd"`, reject `"br"` and uppercase
+- [x] write tests: `validate()` rejects out-of-range level and id, accepts boundary values
+- [x] `cargo test` must pass
 
 ### Task 3: In-memory size cache
 
