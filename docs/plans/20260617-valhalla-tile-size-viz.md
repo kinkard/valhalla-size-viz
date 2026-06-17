@@ -212,15 +212,15 @@ struct CacheKey {
 - Create: `src/api.rs`
 - Modify: `src/main.rs` (add `mod api;`)
 
-- [ ] define request/response structs: `TileSizesRequest { encoding, tiles: Vec<TileRef> }`, `TileRef { level, id }`, `TileSizesResponse { encoding, sizes: Vec<TileSize> }`, `TileSize { level, id, bytes: Option<u64>, cached: bool, missing: bool }`
-- [ ] handler signature: `async fn tile_sizes(State(state): State<AppState>, Json(req): Json<TileSizesRequest>) -> Result<Json<TileSizesResponse>, (StatusCode, String)>`
-- [ ] validate every `TileRef` via `TileId::validate()`, return 400 on the first invalid tile with which one failed
-- [ ] split incoming tiles: lookup cache hits inline, collect misses into a `Vec<(usize, TileId)>` keeping the original index
-- [ ] fan out misses with `futures::stream::iter(misses).map(...).buffer_unordered(state.concurrency)` calling `RatiClient::fetch_size`
-- [ ] write each fetched result back into the cache, then assemble the response preserving the input order
-- [ ] soft cap: reject `req.tiles.len() > 50_000` with 400 to prevent runaway fetches. Empirically a level-2 country selection is in the low thousands; 50k is a comfortable ceiling but is a tunable knob, not a hard correctness boundary. Document this as a soft cap in code comments.
-- [ ] write handler tests using `tower::ServiceExt::oneshot` against the assembled Router, with `wiremock` standing in for rati: empty batch → empty response; cache-hit short-circuit (insert into cache directly, then call handler, assert no upstream call); mixed cached+uncached; 404 propagates as `bytes: null, missing: true`; oversized batch → 400; invalid tile (level=99) → 400
-- [ ] `cargo test` must pass
+- [x] define request/response structs: `TileSizesRequest { encoding, tiles: Vec<TileRef> }`, `TileRef { level, id }`, `TileSizesResponse { encoding, sizes: Vec<TileSize> }`, `TileSize { level, id, bytes: Option<u64>, cached: bool, missing: bool }`
+- [x] handler signature: `async fn tile_sizes(State(state): State<AppState>, Json(req): Json<TileSizesRequest>) -> Result<Json<TileSizesResponse>, (StatusCode, String)>`
+- [x] validate every `TileRef` via `TileId::validate()`, return 400 on the first invalid tile with which one failed
+- [x] split incoming tiles: lookup cache hits inline, collect misses into a `Vec<(usize, TileId)>` keeping the original index
+- [x] fan out misses with `futures::stream::iter(misses).map(...).buffer_unordered(state.concurrency)` calling `RatiClient::fetch_size`
+- [x] write each fetched result back into the cache, then assemble the response preserving the input order
+- [x] soft cap: reject `req.tiles.len() > 50_000` with 400 to prevent runaway fetches. Empirically a level-2 country selection is in the low thousands; 50k is a comfortable ceiling but is a tunable knob, not a hard correctness boundary. Document this as a soft cap in code comments.
+- [x] write handler tests using `tower::ServiceExt::oneshot` against the assembled Router, with `wiremock` standing in for rati: empty batch → empty response; cache-hit short-circuit (insert into cache directly, then call handler, assert no upstream call); mixed cached+uncached; 404 propagates as `bytes: null, missing: true`; oversized batch → 400; invalid tile (level=99) → 400
+- [x] `cargo test` must pass
 
 ### Task 6: Server bootstrap, CLI, and signal handling
 
