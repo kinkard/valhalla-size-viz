@@ -38,6 +38,88 @@ const MAX_BATCH_SIZE: usize = 20_000;
 /// Tile IDs are row-major (id = row*cols + col); max_tile_id = cols*rows - 1.
 const MAX_TILE_IDS: [u32; 3] = [90 * 45 - 1, 360 * 180 - 1, 1440 * 720 - 1];
 
+#[derive(Parser, Debug)]
+#[command(version, about)]
+struct Config {
+    /// Port to listen on
+    #[arg(long, default_value_t = 3000)]
+    port: u16,
+    /// Max concurrent upstream fetches to rati (1..=65535)
+    #[arg(long, default_value_t = NonZeroU16::new(32).unwrap())]
+    concurrency: NonZeroU16,
+    /// rati base URL (e.g. http://localhost:8050)
+    #[arg(long)]
+    rati_url: String,
+}
+
+fn main() {
+    tracing_subscriber::fmt::init();
+
+    let config = Config::parse();
+
+    // 4 worker threads is plenty for an I/O-bound proxy — async tasks share
+    // threads, so we don't need one per in-flight upstream request. The
+    // `--concurrency` flag bounds upstream fan-out via a Semaphore instead.
+    tokio::runtime::Builder::new_multi_thread()
+        .worker_threads(4)
+        .enable_all()
+        .build()
+        .expect("failed to build tokio runtime")
+        .block_on(run(config))
+}
+
+async fn run(config: Config) {
+    let concurrency = usize::from(config.concurrency.get());
+    let http = reqwest::Client::builder()
+        .no_gzip()
+        .no_brotli()
+        .no_deflate()
+        .build()
+        .expect("failed to build reqwest client");
+    let state = AppState {
+        http,
+        base_url: Arc::from(config.rati_url.as_str()),
+        cache: Arc::new(SizeCache::with_hasher(FxBuildHasher)),
+        upstream_permits: Arc::new(Semaphore::new(concurrency)),
+    };
+
+    let app = build_router(state).layer(TraceLayer::new_for_http());
+
+    let bind_addr = ("0.0.0.0", config.port);
+    let listener = tokio::net::TcpListener::bind(bind_addr)
+        .await
+        .unwrap_or_else(|err| panic!("failed to bind to {}:{}: {err}", bind_addr.0, bind_addr.1));
+    let bound = listener
+        .local_addr()
+        .expect("failed to read bound local address");
+    info!(
+        "Listening at http://localhost:{} (rati upstream: {})",
+        bound.port(),
+        config.rati_url
+    );
+
+    axum::serve(listener, app)
+        .with_graceful_shutdown(shutdown_signal())
+        .await
+        .expect("axum::serve failed");
+}
+
+async fn shutdown_signal() {
+    tokio::select! {
+        _ = signal::ctrl_c() => {
+            info!("Ctrl+C received, shutting down");
+        }
+        _ = async {
+            signal::unix::signal(signal::unix::SignalKind::terminate())
+                .expect("failed to install SIGTERM signal handler")
+                .recv()
+                .await
+        } => {
+            info!("SIGTERM received, shutting down");
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Deserialize)]
 #[serde(rename_all = "lowercase")]
 enum Encoding {
@@ -154,20 +236,6 @@ enum FetchError {
     Upstream { status: u16, path: String },
     #[error("upstream returned 200 OK without Content-Length for {path}")]
     MissingContentLength { path: String },
-}
-
-#[derive(Parser, Debug)]
-#[command(version, about)]
-struct Config {
-    /// Port to listen on
-    #[arg(long, default_value_t = 3000)]
-    port: u16,
-    /// Max concurrent upstream fetches to rati (1..=65535)
-    #[arg(long, default_value_t = NonZeroU16::new(32).unwrap())]
-    concurrency: NonZeroU16,
-    /// rati base URL (e.g. http://localhost:8050)
-    #[arg(long)]
-    rati_url: String,
 }
 
 async fn fetch_tile_size(
@@ -400,74 +468,6 @@ async fn serve_index_html(path: impl Into<PathBuf>) -> Result<Html<String>, (Sta
 
 async fn healthz() -> &'static str {
     "OK"
-}
-
-fn main() {
-    tracing_subscriber::fmt::init();
-
-    let config = Config::parse();
-
-    // 4 worker threads is plenty for an I/O-bound proxy — async tasks share
-    // threads, so we don't need one per in-flight upstream request. The
-    // `--concurrency` flag bounds upstream fan-out via a Semaphore instead.
-    tokio::runtime::Builder::new_multi_thread()
-        .worker_threads(4)
-        .enable_all()
-        .build()
-        .expect("failed to build tokio runtime")
-        .block_on(run(config))
-}
-
-async fn run(config: Config) {
-    let concurrency = usize::from(config.concurrency.get());
-    let http = reqwest::Client::builder()
-        .no_gzip()
-        .no_brotli()
-        .no_deflate()
-        .build()
-        .expect("failed to build reqwest client");
-    let state = AppState {
-        http,
-        base_url: Arc::from(config.rati_url.as_str()),
-        cache: Arc::new(SizeCache::with_hasher(FxBuildHasher)),
-        upstream_permits: Arc::new(Semaphore::new(concurrency)),
-    };
-
-    let app = build_router(state).layer(TraceLayer::new_for_http());
-
-    let bind_addr = ("0.0.0.0", config.port);
-    let listener = tokio::net::TcpListener::bind(bind_addr)
-        .await
-        .unwrap_or_else(|err| panic!("failed to bind to {}:{}: {err}", bind_addr.0, bind_addr.1));
-    let bound = listener
-        .local_addr()
-        .expect("failed to read bound local address");
-    info!(
-        "Listening at http://localhost:{} (rati upstream: {})",
-        bound.port(),
-        config.rati_url
-    );
-
-    axum::serve(listener, app)
-        .with_graceful_shutdown(shutdown_signal())
-        .await
-        .expect("axum::serve failed");
-}
-
-async fn shutdown_signal() {
-    tokio::select! {
-        _ = signal::ctrl_c() => {
-            info!("Ctrl+C received, shutting down");
-        }
-        _ = async {
-            signal::unix::signal(signal::unix::SignalKind::terminate())
-                .expect("failed to install SIGTERM signal handler")
-                .recv()
-                .await
-        } => {
-            info!("SIGTERM received, shutting down");
-        }
-    }
 }
 
 #[cfg(test)]
