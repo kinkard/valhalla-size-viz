@@ -18,13 +18,12 @@ use futures_util::StreamExt;
 use reqwest::header;
 use rustc_hash::FxBuildHasher;
 use serde::{Deserialize, Serialize};
-use tokio::{fs::File, io::AsyncReadExt, signal, sync::Semaphore};
+use tokio::{fs::File, io::AsyncReadExt, signal};
 use tower_http::{services::ServeDir, trace::TraceLayer};
 use tracing::{error, info, warn};
 
-/// Upstream request timeout. Each in-flight fetch holds a Semaphore permit for
-/// its duration, so an unbounded wait would deadlock concurrency under a slow
-/// or hung rati.
+/// Upstream request timeout. Without this, a slow or hung rati would pin
+/// `buffer_unordered` slots indefinitely and stall every concurrent batch.
 const UPSTREAM_TIMEOUT: Duration = Duration::from_secs(30);
 
 /// Where the bundled HTML/JS lives on disk. Also used by `ServeDir` for
@@ -65,7 +64,7 @@ fn main() {
 
     // 4 worker threads is plenty for an I/O-bound proxy — async tasks share
     // threads, so we don't need one per in-flight upstream request. The
-    // `--concurrency` flag bounds upstream fan-out via a Semaphore instead.
+    // `--concurrency` flag bounds upstream fan-out via `buffer_unordered`.
     tokio::runtime::Builder::new_multi_thread()
         .worker_threads(4)
         .enable_all()
@@ -87,7 +86,7 @@ async fn run(config: Config) {
         http,
         base_url: Arc::from(config.rati_url.as_str()),
         cache: Arc::new(SizeCache::with_hasher(FxBuildHasher)),
-        upstream_permits: Arc::new(Semaphore::new(concurrency)),
+        concurrency,
     };
 
     let app = build_router(state).layer(TraceLayer::new_for_http());
@@ -196,8 +195,9 @@ struct AppState {
     http: reqwest::Client,
     base_url: Arc<str>,
     cache: Arc<SizeCache>,
-    /// Bounds upstream fan-out globally across all concurrent requests.
-    upstream_permits: Arc<Semaphore>,
+    /// Per-request upstream fan-out. Not a global cap — multiple concurrent
+    /// batches each fan out this wide. Fine for a single-user viz tool.
+    concurrency: usize,
 }
 
 #[derive(Debug, Deserialize)]
@@ -359,28 +359,19 @@ async fn tile_sizes(
     let http = state.http.clone();
     let base_url = state.base_url.clone();
     let cache = state.cache.clone();
-    let permits = state.upstream_permits.clone();
-    // The Semaphore is the real global cap; here we just bound futures spawned
-    // by this batch — never more than the number of tiles we need to fetch.
-    let buffer_size = misses.len().max(1);
 
     let fetched: Vec<(usize, TileId, Result<FetchOutcome, String>)> =
         futures_util::stream::iter(misses.into_iter().map(|(idx, tile)| {
             let http = http.clone();
             let base_url = base_url.clone();
-            let permits = permits.clone();
             async move {
-                let _permit = permits
-                    .acquire()
-                    .await
-                    .expect("upstream semaphore is never closed");
                 let outcome = fetch_tile_size(&http, &base_url, tile, encoding)
                     .await
                     .map_err(|e| e.to_string());
                 (idx, tile, outcome)
             }
         }))
-        .buffer_unordered(buffer_size)
+        .buffer_unordered(state.concurrency)
         .collect()
         .await;
 
@@ -523,7 +514,7 @@ mod tests {
                 .unwrap(),
             base_url: Arc::from(base_url),
             cache: Arc::new(SizeCache::with_hasher(FxBuildHasher)),
-            upstream_permits: Arc::new(Semaphore::new(concurrency)),
+            concurrency,
         }
     }
 
