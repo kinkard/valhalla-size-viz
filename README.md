@@ -2,7 +2,7 @@
 
 Visualize [Valhalla](https://github.com/valhalla/valhalla) graph tile sizes on a map. Draw a bounding box, polygon, country, or route, and see how many bytes each tile would take to download — useful for estimating offline map footprints and predictive prefetch budgets.
 
-The tool is a small [axum](https://github.com/tokio-rs/axum) server that proxies tile size requests to a [rati](https://github.com/kinkard/rati) instance and caches results in memory. The frontend is a single MapLibre HTML page served by the same process.
+The tool is a small [axum](https://github.com/tokio-rs/axum) server that proxies tile size requests to a [rati](https://github.com/valhalla/rati) instance and caches results in memory. The frontend is a single MapLibre HTML page served by the same process.
 
 ![screenshot](docs/screenshot.png)
 
