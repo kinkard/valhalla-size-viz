@@ -134,13 +134,13 @@ struct CacheKey {
 - Modify: `Cargo.toml`
 - Create: `Cargo.lock` (committed)
 
-- [ ] runtime deps: `axum = "0.8"`, `clap = { version = "4.5", features = ["derive", "env"] }`, `dashmap = "6"`, `futures = "0.3"`, `reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "stream"] }`, `rustc-hash = "2"`, `serde = { version = "1", features = ["derive"] }`, `serde_json = "1"`, `thiserror = "2"`, `tokio = { version = "1", features = ["rt-multi-thread", "fs", "io-util", "signal", "sync"] }`, `tower = { version = "0.5", features = ["util"] }`, `tower-http = { version = "0.6", features = ["trace"] }`, `tracing = "0.1"`, `tracing-subscriber = { version = "0.3", features = ["fmt", "ansi"] }`
-- [ ] dev-deps: `pretty_assertions = "1"`, `wiremock = "0.6"`
-- [ ] set `repository = "https://github.com/kinkard/valhalla-size-viz"`
-- [ ] set `description = "Visualize Valhalla graph tile sizes on a map"`
-- [ ] expand `include = ["src/**/*.rs", "web/**", "Cargo.toml", "README.md", "LICENSE-*"]`
-- [ ] run `cargo build` once, commit the resulting `Cargo.lock` (Rust binaries should commit their lockfile)
-- [ ] no tests for this task — verify by `cargo build` succeeding
+- [x] runtime deps: `axum = "0.8"`, `clap = { version = "4.5", features = ["derive", "env"] }`, `dashmap = "6"`, `futures = "0.3"`, `reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "stream"] }`, `rustc-hash = "2"`, `serde = { version = "1", features = ["derive"] }`, `serde_json = "1"`, `thiserror = "2"`, `tokio = { version = "1", features = ["rt-multi-thread", "fs", "io-util", "signal", "sync"] }`, `tower = { version = "0.5", features = ["util"] }`, `tower-http = { version = "0.6", features = ["trace"] }`, `tracing = "0.1"`, `tracing-subscriber = { version = "0.3", features = ["fmt", "ansi"] }`
+- [x] dev-deps: `pretty_assertions = "1"`, `wiremock = "0.6"`
+- [x] set `repository = "https://github.com/kinkard/valhalla-size-viz"`
+- [x] set `description = "Visualize Valhalla graph tile sizes on a map"`
+- [x] expand `include = ["src/**/*.rs", "web/**", "Cargo.toml", "README.md", "LICENSE-*"]`
+- [x] run `cargo build` once, commit the resulting `Cargo.lock` (Rust binaries should commit their lockfile)
+- [x] no tests for this task — verify by `cargo build` succeeding
 
 ### Task 1b: Reconcile existing infrastructure
 

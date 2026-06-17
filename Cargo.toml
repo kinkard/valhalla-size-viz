@@ -3,11 +3,11 @@ name = "valhalla-size-viz"
 version = "0.1.0"
 edition = "2024"
 rust-version = "1.94"
-description = "valhalla-size-viz"
+description = "Visualize Valhalla graph tile sizes on a map"
 readme = "README.md"
-repository = "https://github.com/Stepan Kizim/valhalla-size-viz"
+repository = "https://github.com/kinkard/valhalla-size-viz"
 license = "MIT OR Apache-2.0"
-include = ["**/*.rs"]
+include = ["src/**/*.rs", "web/**", "Cargo.toml", "README.md", "LICENSE-*"]
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
@@ -16,6 +16,21 @@ strip = true
 lto = "thin"
 
 [dependencies]
+axum = "0.8"
+clap = { version = "4.5", features = ["derive", "env"] }
+dashmap = "6"
+futures = "0.3"
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "stream"] }
+rustc-hash = "2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror = "2"
+tokio = { version = "1", features = ["rt-multi-thread", "fs", "io-util", "signal", "sync"] }
+tower = { version = "0.5", features = ["util"] }
+tower-http = { version = "0.6", features = ["trace"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["fmt", "ansi"] }
 
 [dev-dependencies]
 pretty_assertions = "1"
+wiremock = "0.6"
