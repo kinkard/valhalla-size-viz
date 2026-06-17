@@ -1,4 +1,6 @@
 #[allow(dead_code)]
+mod cache;
+#[allow(dead_code)]
 mod tiles;
 
 fn main() {

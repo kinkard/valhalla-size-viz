@@ -180,14 +180,14 @@ struct CacheKey {
 - Create: `src/cache.rs`
 - Modify: `src/main.rs` (add `mod cache;`)
 
-- [ ] define `SizeCache` wrapping `DashMap<CacheKey, Option<u64>, FxBuildHasher>` (`rustc_hash::FxBuildHasher`)
-- [ ] `CacheKey { level: u8, tile_id: u32, encoding: Encoding }`
-- [ ] methods: `new()`, `get(&self, key) -> Option<Option<u64>>`, `insert(&self, key, value)`, `len(&self)`
-- [ ] cache value: `Option<u64>` — `Some(bytes)` for known size, `None` for confirmed-404
-- [ ] write tests: insert+get round-trip
-- [ ] write tests: separate entries for the same tile under different encodings
-- [ ] write tests: 404 caching (`insert(k, None)` then `get(k)` returns `Some(None)`)
-- [ ] `cargo test` must pass
+- [x] define `SizeCache` wrapping `DashMap<CacheKey, Option<u64>, FxBuildHasher>` (`rustc_hash::FxBuildHasher`)
+- [x] `CacheKey { level: u8, tile_id: u32, encoding: Encoding }`
+- [x] methods: `new()`, `get(&self, key) -> Option<Option<u64>>`, `insert(&self, key, value)`, `len(&self)`
+- [x] cache value: `Option<u64>` — `Some(bytes)` for known size, `None` for confirmed-404
+- [x] write tests: insert+get round-trip
+- [x] write tests: separate entries for the same tile under different encodings
+- [x] write tests: 404 caching (`insert(k, None)` then `get(k)` returns `Some(None)`)
+- [x] `cargo test` must pass
 
 ### Task 4: Rati upstream client
 
