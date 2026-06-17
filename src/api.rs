@@ -3,20 +3,24 @@ use std::sync::Arc;
 use axum::{Json, extract::State, http::StatusCode};
 use futures::StreamExt;
 use serde::{Deserialize, Serialize};
+use tokio::sync::Semaphore;
 
 use crate::cache::{CacheKey, SizeCache};
 use crate::tiles::{Encoding, TileId};
 use crate::upstream::{FetchOutcome, RatiClient};
 
-// Soft cap: country-mode level-2 selections are in the low thousands; 50k is a
-// comfortable ceiling that prevents accidental runaway fetches without being a
-// hard correctness boundary.
-const MAX_BATCH_SIZE: usize = 50_000;
+// Soft cap: country-mode level-2 selections are in the low thousands; 20k is a
+// comfortable ceiling that fits inside axum's default 2 MiB body limit and
+// prevents accidental runaway fetches. Not a hard correctness boundary.
+pub const MAX_BATCH_SIZE: usize = 20_000;
 
 #[derive(Clone)]
 pub struct AppState {
     pub rati: Arc<RatiClient>,
     pub cache: Arc<SizeCache>,
+    /// Bounds upstream fan-out globally across all concurrent requests.
+    pub upstream_permits: Arc<Semaphore>,
+    /// Configured concurrency value, kept for display/health.
     pub concurrency: usize,
 }
 
@@ -39,6 +43,8 @@ pub struct TileSize {
     pub bytes: Option<u64>,
     pub cached: bool,
     pub missing: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
 }
 
 #[derive(Debug, Serialize, PartialEq, Eq)]
@@ -83,13 +89,14 @@ pub async fn tile_sizes(
             tile_id: tile.id,
             encoding,
         };
-        if let Some(cached) = state.cache.get(key) {
+        if let Some(cached) = state.cache.get(&key).map(|r| *r.value()) {
             results[idx] = Some(TileSize {
                 level: tile.level,
                 id: tile.id,
                 bytes: cached,
                 cached: true,
                 missing: cached.is_none(),
+                error: None,
             });
         } else {
             misses.push((idx, tile));
@@ -98,12 +105,20 @@ pub async fn tile_sizes(
 
     let rati = state.rati.clone();
     let cache = state.cache.clone();
-    let concurrency = state.concurrency.max(1);
+    let permits = state.upstream_permits.clone();
+    // bound the per-request fan-out by the global permit count too — no reason
+    // to spawn more futures than will ever run concurrently.
+    let buffer_size = permits.available_permits().max(1).min(misses.len().max(1));
 
     let fetched: Vec<(usize, TileId, Result<FetchOutcome, String>)> =
         futures::stream::iter(misses.into_iter().map(|(idx, tile)| {
             let rati = rati.clone();
+            let permits = permits.clone();
             async move {
+                let _permit = permits
+                    .acquire()
+                    .await
+                    .expect("upstream semaphore is never closed");
                 let outcome = rati
                     .fetch_size(tile, encoding)
                     .await
@@ -111,7 +126,7 @@ pub async fn tile_sizes(
                 (idx, tile, outcome)
             }
         }))
-        .buffer_unordered(concurrency)
+        .buffer_unordered(buffer_size)
         .collect()
         .await;
 
@@ -121,29 +136,43 @@ pub async fn tile_sizes(
             tile_id: tile.id,
             encoding,
         };
-        let (bytes, missing) = match outcome {
+        let tile_size = match outcome {
             Ok(FetchOutcome::Found(b)) => {
                 cache.insert(key, Some(b));
-                (Some(b), false)
+                TileSize {
+                    level: tile.level,
+                    id: tile.id,
+                    bytes: Some(b),
+                    cached: false,
+                    missing: false,
+                    error: None,
+                }
             }
             Ok(FetchOutcome::Missing) => {
                 cache.insert(key, None);
-                (None, true)
+                TileSize {
+                    level: tile.level,
+                    id: tile.id,
+                    bytes: None,
+                    cached: false,
+                    missing: true,
+                    error: None,
+                }
             }
             Err(err) => {
-                return Err((
-                    StatusCode::BAD_GATEWAY,
-                    format!("upstream fetch failed for {}: {err}", tile.to_path()),
-                ));
+                // Don't poison the cache on transient upstream failures; just
+                // surface the error per tile so the rest of the batch lands.
+                TileSize {
+                    level: tile.level,
+                    id: tile.id,
+                    bytes: None,
+                    cached: false,
+                    missing: false,
+                    error: Some(err),
+                }
             }
         };
-        results[idx] = Some(TileSize {
-            level: tile.level,
-            id: tile.id,
-            bytes,
-            cached: false,
-            missing,
-        });
+        results[idx] = Some(tile_size);
     }
 
     let sizes = results.into_iter().map(|r| r.expect("filled")).collect();
@@ -156,17 +185,29 @@ pub async fn tile_sizes(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use axum::{Router, body::Body, http::Request, routing::post};
+    use axum::{
+        Router,
+        body::Body,
+        extract::DefaultBodyLimit,
+        http::Request,
+        routing::{MethodRouter, post},
+    };
     use pretty_assertions::assert_eq;
+    use rustc_hash::FxBuildHasher;
     use serde_json::{Value, json};
     use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::time::Duration;
     use tower::ServiceExt;
     use wiremock::matchers::{method, path as match_path};
     use wiremock::{Mock, MockServer, Respond, ResponseTemplate};
 
+    fn tile_sizes_route() -> MethodRouter<AppState> {
+        post(tile_sizes).layer(DefaultBodyLimit::max(4 * 1024 * 1024))
+    }
+
     fn router(state: AppState) -> Router {
         Router::new()
-            .route("/api/tile-sizes", post(tile_sizes))
+            .route("/api/tile-sizes", tile_sizes_route())
             .with_state(state)
     }
 
@@ -194,7 +235,8 @@ mod tests {
     fn make_state(base_url: &str, concurrency: usize) -> AppState {
         AppState {
             rati: Arc::new(RatiClient::new(base_url.to_string()).unwrap()),
-            cache: Arc::new(SizeCache::new()),
+            cache: Arc::new(SizeCache::with_hasher(FxBuildHasher)),
+            upstream_permits: Arc::new(Semaphore::new(concurrency)),
             concurrency,
         }
     }
@@ -338,11 +380,13 @@ mod tests {
         assert_eq!(sizes[0]["cached"], false);
 
         assert_eq!(
-            cache.get(CacheKey {
-                level: 2,
-                tile_id: 818660,
-                encoding: Encoding::Zstd,
-            }),
+            cache
+                .get(&CacheKey {
+                    level: 2,
+                    tile_id: 818660,
+                    encoding: Encoding::Zstd,
+                })
+                .map(|v| *v.value()),
             Some(None)
         );
     }
@@ -386,5 +430,114 @@ mod tests {
         )
         .await;
         assert_eq!(status, StatusCode::BAD_REQUEST);
+    }
+
+    #[tokio::test]
+    async fn upstream_5xx_returns_per_tile_error_without_poisoning_cache() {
+        let server = MockServer::start().await;
+        // tile 0/000/529: succeeds with 200 OK / 7 bytes
+        Mock::given(method("GET"))
+            .and(match_path("/tiles/0/000/529.gph"))
+            .respond_with(ResponseTemplate::new(200).set_body_bytes(vec![0u8; 7]))
+            .mount(&server)
+            .await;
+        // tile 2/818/660: always fails 500
+        Mock::given(method("GET"))
+            .and(match_path("/tiles/2/818/660.gph"))
+            .respond_with(ResponseTemplate::new(500))
+            .mount(&server)
+            .await;
+
+        let state = make_state(&server.uri(), 4);
+        let cache = state.cache.clone();
+
+        let (status, body) = call(
+            router(state),
+            json!({
+                "encoding": "zstd",
+                "tiles": [
+                    { "level": 0, "id": 529 },
+                    { "level": 2, "id": 818660 }
+                ]
+            }),
+        )
+        .await;
+
+        // batch returns 200, the failing tile carries an error string
+        assert_eq!(status, StatusCode::OK);
+        let sizes = body.get("sizes").unwrap().as_array().unwrap();
+        assert_eq!(sizes.len(), 2);
+        assert_eq!(sizes[0]["bytes"], 7);
+        assert_eq!(sizes[0]["missing"], false);
+        assert!(sizes[0].get("error").is_none());
+        assert_eq!(sizes[1]["bytes"], Value::Null);
+        assert_eq!(sizes[1]["missing"], false);
+        assert!(sizes[1]["error"].is_string());
+
+        // cache holds the successful tile…
+        assert_eq!(
+            cache
+                .get(&CacheKey {
+                    level: 0,
+                    tile_id: 529,
+                    encoding: Encoding::Zstd,
+                })
+                .map(|v| *v.value()),
+            Some(Some(7))
+        );
+        // …but is NOT poisoned with the failed one.
+        assert!(
+            cache
+                .get(&CacheKey {
+                    level: 2,
+                    tile_id: 818660,
+                    encoding: Encoding::Zstd,
+                })
+                .is_none()
+        );
+    }
+
+    #[tokio::test]
+    async fn concurrent_fetches_preserve_input_order_under_delays() {
+        let server = MockServer::start().await;
+
+        // 30 distinct level-2 tiles. The earliest in the input list get the
+        // longest upstream delay; if results were returned in completion order
+        // (rather than rebound to input index), the assertion below would fail.
+        const N: u32 = 30;
+        const BASE_ID: u32 = 100_000;
+        for i in 0..N {
+            let tile_id = BASE_ID + i;
+            let dir = tile_id / 1000;
+            let file = tile_id % 1000;
+            let path = format!("/tiles/2/{dir:03}/{file:03}.gph");
+            // delay shrinks from N-i down to 0 ms, so input position 0 finishes last
+            let delay_ms = (N - i) as u64;
+            Mock::given(method("GET"))
+                .and(match_path(path))
+                .respond_with(
+                    ResponseTemplate::new(200)
+                        .set_body_bytes(vec![0u8; tile_id as usize])
+                        .set_delay(Duration::from_millis(delay_ms)),
+                )
+                .mount(&server)
+                .await;
+        }
+
+        let state = make_state(&server.uri(), 8);
+        let tiles: Vec<Value> = (0..N)
+            .map(|i| json!({ "level": 2, "id": BASE_ID + i }))
+            .collect();
+        let (status, body) =
+            call(router(state), json!({ "encoding": "zstd", "tiles": tiles })).await;
+
+        assert_eq!(status, StatusCode::OK);
+        let sizes = body.get("sizes").unwrap().as_array().unwrap();
+        assert_eq!(sizes.len(), N as usize);
+        for (i, item) in sizes.iter().enumerate() {
+            assert_eq!(item["level"], 2);
+            assert_eq!(item["id"], BASE_ID + i as u32);
+            assert_eq!(item["bytes"], BASE_ID + i as u32);
+        }
     }
 }

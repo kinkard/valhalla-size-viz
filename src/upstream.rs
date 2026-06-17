@@ -1,5 +1,3 @@
-use std::sync::Arc;
-
 use futures::StreamExt;
 use reqwest::{StatusCode, header};
 use tracing::warn;
@@ -22,20 +20,17 @@ pub enum FetchError {
 
 pub struct RatiClient {
     http: reqwest::Client,
-    base_url: Arc<str>,
+    base_url: String,
 }
 
 impl RatiClient {
-    pub fn new(base_url: impl Into<Arc<str>>) -> Result<Self, reqwest::Error> {
+    pub fn new(base_url: String) -> Result<Self, reqwest::Error> {
         let http = reqwest::Client::builder()
             .no_gzip()
             .no_brotli()
             .no_deflate()
             .build()?;
-        Ok(Self {
-            http,
-            base_url: base_url.into(),
-        })
+        Ok(Self { http, base_url })
     }
 
     pub async fn fetch_size(

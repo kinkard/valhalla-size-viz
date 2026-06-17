@@ -10,41 +10,8 @@ pub struct CacheKey {
     pub encoding: Encoding,
 }
 
-pub struct SizeCache {
-    entries: DashMap<CacheKey, Option<u64>, FxBuildHasher>,
-}
-
-impl SizeCache {
-    pub fn new() -> Self {
-        Self {
-            entries: DashMap::with_hasher(FxBuildHasher),
-        }
-    }
-
-    pub fn get(&self, key: CacheKey) -> Option<Option<u64>> {
-        self.entries.get(&key).map(|v| *v)
-    }
-
-    pub fn insert(&self, key: CacheKey, value: Option<u64>) {
-        self.entries.insert(key, value);
-    }
-
-    #[allow(dead_code)]
-    pub fn len(&self) -> usize {
-        self.entries.len()
-    }
-
-    #[allow(dead_code)]
-    pub fn is_empty(&self) -> bool {
-        self.entries.is_empty()
-    }
-}
-
-impl Default for SizeCache {
-    fn default() -> Self {
-        Self::new()
-    }
-}
+/// In-memory tile-size cache. `Some(bytes)` for a known size, `None` for a confirmed 404.
+pub type SizeCache = DashMap<CacheKey, Option<u64>, FxBuildHasher>;
 
 #[cfg(test)]
 mod tests {
@@ -59,35 +26,39 @@ mod tests {
         }
     }
 
+    fn new_cache() -> SizeCache {
+        SizeCache::with_hasher(FxBuildHasher)
+    }
+
     #[test]
     fn new_cache_is_empty() {
-        let cache = SizeCache::new();
+        let cache = new_cache();
         assert_eq!(cache.len(), 0);
-        assert_eq!(cache.get(key(2, 818660, Encoding::Zstd)), None);
+        assert!(cache.get(&key(2, 818660, Encoding::Zstd)).is_none());
     }
 
     #[test]
     fn insert_and_get_round_trip() {
-        let cache = SizeCache::new();
+        let cache = new_cache();
         let k = key(2, 818660, Encoding::Zstd);
         cache.insert(k, Some(2435));
-        assert_eq!(cache.get(k), Some(Some(2435)));
+        assert_eq!(cache.get(&k).map(|v| *v.value()), Some(Some(2435)));
         assert_eq!(cache.len(), 1);
     }
 
     #[test]
     fn insert_overwrites_existing_value() {
-        let cache = SizeCache::new();
+        let cache = new_cache();
         let k = key(1, 51234, Encoding::Gzip);
         cache.insert(k, Some(100));
         cache.insert(k, Some(200));
-        assert_eq!(cache.get(k), Some(Some(200)));
+        assert_eq!(cache.get(&k).map(|v| *v.value()), Some(Some(200)));
         assert_eq!(cache.len(), 1);
     }
 
     #[test]
     fn separate_entries_per_encoding() {
-        let cache = SizeCache::new();
+        let cache = new_cache();
         let identity_key = key(2, 818660, Encoding::Identity);
         let gzip_key = key(2, 818660, Encoding::Gzip);
         let zstd_key = key(2, 818660, Encoding::Zstd);
@@ -96,27 +67,30 @@ mod tests {
         cache.insert(gzip_key, Some(4_000));
         cache.insert(zstd_key, Some(2_435));
 
-        assert_eq!(cache.get(identity_key), Some(Some(10_000)));
-        assert_eq!(cache.get(gzip_key), Some(Some(4_000)));
-        assert_eq!(cache.get(zstd_key), Some(Some(2_435)));
+        assert_eq!(
+            cache.get(&identity_key).map(|v| *v.value()),
+            Some(Some(10_000))
+        );
+        assert_eq!(cache.get(&gzip_key).map(|v| *v.value()), Some(Some(4_000)));
+        assert_eq!(cache.get(&zstd_key).map(|v| *v.value()), Some(Some(2_435)));
         assert_eq!(cache.len(), 3);
     }
 
     #[test]
     fn missing_tile_cached_as_none() {
-        let cache = SizeCache::new();
+        let cache = new_cache();
         let k = key(0, 529, Encoding::Identity);
         cache.insert(k, None);
-        assert_eq!(cache.get(k), Some(None));
+        assert_eq!(cache.get(&k).map(|v| *v.value()), Some(None));
         assert_eq!(cache.len(), 1);
     }
 
     #[test]
     fn unknown_key_returns_none() {
-        let cache = SizeCache::new();
+        let cache = new_cache();
         cache.insert(key(0, 1, Encoding::Zstd), Some(42));
-        assert_eq!(cache.get(key(0, 2, Encoding::Zstd)), None);
-        assert_eq!(cache.get(key(1, 1, Encoding::Zstd)), None);
-        assert_eq!(cache.get(key(0, 1, Encoding::Gzip)), None);
+        assert!(cache.get(&key(0, 2, Encoding::Zstd)).is_none());
+        assert!(cache.get(&key(1, 1, Encoding::Zstd)).is_none());
+        assert!(cache.get(&key(0, 1, Encoding::Gzip)).is_none());
     }
 }

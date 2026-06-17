@@ -1,6 +1,7 @@
 use serde::Deserialize;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Deserialize)]
+#[serde(rename_all = "lowercase")]
 pub enum Encoding {
     Identity,
     Gzip,
@@ -17,58 +18,12 @@ impl Encoding {
     }
 }
 
-impl<'de> Deserialize<'de> for Encoding {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: serde::Deserializer<'de>,
-    {
-        let s = String::deserialize(deserializer)?;
-        match s.as_str() {
-            "identity" => Ok(Encoding::Identity),
-            "gzip" => Ok(Encoding::Gzip),
-            "zstd" => Ok(Encoding::Zstd),
-            other => Err(serde::de::Error::custom(format!(
-                "unknown encoding {other:?}, expected one of \"identity\", \"gzip\", \"zstd\""
-            ))),
-        }
-    }
-}
-
-#[derive(Debug, Clone, Copy)]
-pub struct LevelSpec {
-    #[allow(dead_code)]
-    pub size_deg: f64,
-    #[allow(dead_code)]
-    pub cols: u32,
-    #[allow(dead_code)]
-    pub rows: u32,
-    pub max_tile_id: u32,
-}
-
-// Valhalla graph tile grids: level 0 = highway (4° tiles), level 1 = arterial (1°),
-// level 2 = local (0.25°). Tile IDs are row-major (id = row * cols + col), so
-// max_tile_id = cols * rows - 1. Kept as a static table because these are protocol
-// constants baked into Valhalla, not configuration.
-pub const LEVELS: [LevelSpec; 3] = [
-    LevelSpec {
-        size_deg: 4.0,
-        cols: 90,
-        rows: 45,
-        max_tile_id: 90 * 45 - 1,
-    },
-    LevelSpec {
-        size_deg: 1.0,
-        cols: 360,
-        rows: 180,
-        max_tile_id: 360 * 180 - 1,
-    },
-    LevelSpec {
-        size_deg: 0.25,
-        cols: 1440,
-        rows: 720,
-        max_tile_id: 1440 * 720 - 1,
-    },
-];
+// Valhalla graph tile grids: level 0 = highway (4° tiles, 90×45 cols×rows),
+// level 1 = arterial (1°, 360×180), level 2 = local (0.25°, 1440×720).
+// Tile IDs are row-major (id = row * cols + col), so max_tile_id = cols * rows - 1.
+// Kept as a static table because these are protocol constants baked into Valhalla,
+// not configuration.
+pub const MAX_TILE_IDS: [u32; 3] = [90 * 45 - 1, 360 * 180 - 1, 1440 * 720 - 1];
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct TileId {
@@ -92,14 +47,14 @@ impl TileId {
     }
 
     pub fn validate(self) -> Result<(), TileIdError> {
-        let spec = LEVELS
+        let max = MAX_TILE_IDS
             .get(self.level as usize)
             .ok_or(TileIdError::InvalidLevel { level: self.level })?;
-        if self.id > spec.max_tile_id {
+        if self.id > *max {
             return Err(TileIdError::IdOutOfRange {
                 level: self.level,
                 id: self.id,
-                max: spec.max_tile_id,
+                max: *max,
             });
         }
         Ok(())

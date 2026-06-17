@@ -1,7 +1,8 @@
-use std::{num::NonZero, sync::Arc};
+use std::{num::NonZeroU16, sync::Arc};
 
 use clap::Parser;
-use tokio::signal;
+use rustc_hash::FxBuildHasher;
+use tokio::{signal, sync::Semaphore};
 use tower_http::trace::TraceLayer;
 use tracing::info;
 
@@ -13,9 +14,9 @@ struct Config {
     /// Port to listen on
     #[arg(long, default_value_t = 3000)]
     port: u16,
-    /// Max concurrent upstream fetches to rati
-    #[arg(long, default_value_t = 32)]
-    concurrency: u16,
+    /// Max concurrent upstream fetches to rati (1..=65535)
+    #[arg(long, default_value_t = NonZeroU16::new(32).unwrap())]
+    concurrency: NonZeroU16,
     /// rati base URL (e.g. http://localhost:8050)
     #[arg(long)]
     rati_url: String,
@@ -26,34 +27,35 @@ fn main() {
 
     let config = Config::parse();
 
+    // The upstream concurrency knob bounds I/O fan-out, not CPU parallelism;
+    // let tokio pick a reasonable worker-thread count on its own.
     tokio::runtime::Builder::new_multi_thread()
-        .worker_threads(
-            std::thread::available_parallelism()
-                .map(NonZero::get)
-                .unwrap_or(16)
-                .min(config.concurrency as usize),
-        )
         .enable_all()
         .build()
-        .unwrap()
+        .expect("failed to build tokio runtime")
         .block_on(run(config))
 }
 
 async fn run(config: Config) {
+    let concurrency = usize::from(config.concurrency.get());
     let rati =
         Arc::new(RatiClient::new(config.rati_url.clone()).expect("failed to build reqwest client"));
     let state = AppState {
         rati,
-        cache: Arc::new(SizeCache::new()),
-        concurrency: config.concurrency as usize,
+        cache: Arc::new(SizeCache::with_hasher(FxBuildHasher)),
+        upstream_permits: Arc::new(Semaphore::new(concurrency)),
+        concurrency,
     };
 
     let app = build_router(state).layer(TraceLayer::new_for_http());
 
-    let listener = tokio::net::TcpListener::bind(("0.0.0.0", config.port))
+    let bind_addr = ("0.0.0.0", config.port);
+    let listener = tokio::net::TcpListener::bind(bind_addr)
         .await
-        .unwrap();
-    let bound = listener.local_addr().unwrap();
+        .unwrap_or_else(|err| panic!("failed to bind to {}:{}: {err}", bind_addr.0, bind_addr.1));
+    let bound = listener
+        .local_addr()
+        .expect("failed to read bound local address");
     info!(
         "Listening at http://localhost:{} (rati upstream: {})",
         bound.port(),
@@ -63,7 +65,7 @@ async fn run(config: Config) {
     axum::serve(listener, app)
         .with_graceful_shutdown(shutdown_signal())
         .await
-        .unwrap();
+        .expect("axum::serve failed");
 }
 
 async fn shutdown_signal() {
@@ -95,7 +97,8 @@ mod tests {
     fn test_state() -> AppState {
         AppState {
             rati: Arc::new(RatiClient::new("http://localhost:0".to_string()).unwrap()),
-            cache: Arc::new(SizeCache::new()),
+            cache: Arc::new(SizeCache::with_hasher(FxBuildHasher)),
+            upstream_permits: Arc::new(Semaphore::new(32)),
             concurrency: 32,
         }
     }
@@ -113,7 +116,7 @@ mod tests {
         ])
         .unwrap();
         assert_eq!(cfg.port, 4000);
-        assert_eq!(cfg.concurrency, 16);
+        assert_eq!(cfg.concurrency.get(), 16);
         assert_eq!(cfg.rati_url, "http://example:8050");
     }
 
@@ -123,7 +126,23 @@ mod tests {
             Config::try_parse_from(["valhalla-size-viz", "--rati-url", "http://localhost:8050"])
                 .unwrap();
         assert_eq!(cfg.port, 3000);
-        assert_eq!(cfg.concurrency, 32);
+        assert_eq!(cfg.concurrency.get(), 32);
+    }
+
+    #[test]
+    fn cli_rejects_concurrency_zero() {
+        // Catches the historical regression where `--concurrency 0` panicked
+        // tokio's runtime builder. clap now enforces NonZeroU16.
+        let err = Config::try_parse_from([
+            "valhalla-size-viz",
+            "--rati-url",
+            "http://localhost:8050",
+            "--concurrency",
+            "0",
+        ])
+        .unwrap_err();
+        let msg = err.to_string();
+        assert!(msg.contains("concurrency"), "unexpected error: {msg}");
     }
 
     #[test]
