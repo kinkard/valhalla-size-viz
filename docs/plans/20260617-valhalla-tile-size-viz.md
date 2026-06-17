@@ -286,6 +286,16 @@ struct CacheKey {
 - [ ] move this plan file into `docs/plans/completed/`
 - [ ] commit directly to `main`
 
+## User's Feedback (during execution)
+
+The user flagged these mid-execution; they supersede earlier plan decisions where they conflict:
+
+- **Use `futures-util = { version = "0.3", default-features = false, features = ["alloc"] }` instead of the umbrella `futures` crate.** Lighter dep tree; we only need combinators (`StreamExt`, `buffered`).
+- **Drop the `src/lib.rs` + `src/main.rs` split.** It was introduced solely so `tests/serve_html.rs` could import the router. Fold everything back into `src/main.rs`, delete `tests/serve_html.rs` — that test ("body contains a substring") verifies nothing real. Match the structure of `../rati` and `../valhalla-debug`.
+- **Tokio worker_threads cap at 4, decoupled from `--concurrency`.** Async tasks share threads — you don't need 32 OS threads to issue 32 concurrent HTTP fetches. The runtime should be hardcoded to ~4 workers; `--concurrency` only bounds upstream in-flight requests (via `Semaphore` or `buffered`).
+- **Drop `src/cache.rs`. Don't test trivial type aliases.** `pub type SizeCache = DashMap<…>` doesn't deserve its own file or unit tests — DashMap is tested upstream. Move `CacheKey` and the alias inline where they're used.
+- **Use the response's `Content-Length` header in `RatiClient::fetch_size`** instead of streaming and counting bytes. rati always sets `Content-Length` on tile GETs (axum derives it from the finite `Bytes` body it returns, including any re-encoded content). Trust that header. The streaming counter is dead weight.
+
 ## Post-Completion
 
 **Manual verification:**

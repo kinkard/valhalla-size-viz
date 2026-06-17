@@ -1,4 +1,3 @@
-use futures::StreamExt;
 use reqwest::{StatusCode, header};
 use tracing::warn;
 
@@ -16,6 +15,8 @@ pub enum FetchError {
     Network(#[from] reqwest::Error),
     #[error("upstream returned status {status} for {path}")]
     Upstream { status: u16, path: String },
+    #[error("upstream returned 200 OK without Content-Length for {path}")]
+    MissingContentLength { path: String },
 }
 
 pub struct RatiClient {
@@ -78,13 +79,13 @@ impl RatiClient {
             );
         }
 
-        let mut stream = response.bytes_stream();
-        let mut bytes: u64 = 0;
-        while let Some(chunk) = stream.next().await {
-            let chunk = chunk?;
-            bytes += chunk.len() as u64;
+        // rati always sets Content-Length on tile GETs (axum derives it from the
+        // finite Bytes body it returns). If it's missing, something is wrong
+        // upstream — surface it rather than silently misreport the size.
+        match response.content_length() {
+            Some(len) => Ok(FetchOutcome::Found(len)),
+            None => Err(FetchError::MissingContentLength { path }),
         }
-        Ok(FetchOutcome::Found(bytes))
     }
 }
 
@@ -210,5 +211,52 @@ mod tests {
         let tile = TileId { level: 0, id: 529 };
         let outcome = client.fetch_size(tile, Encoding::Identity).await.unwrap();
         assert_eq!(outcome, FetchOutcome::Found(3));
+    }
+
+    #[tokio::test]
+    async fn fetch_200_without_content_length_returns_error() {
+        // Chunked transfer with no Content-Length — wiremock doesn't easily
+        // simulate this, but we can drive it through a raw TCP listener.
+        use tokio::io::AsyncWriteExt;
+        use tokio::net::TcpListener;
+
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+
+        tokio::spawn(async move {
+            let (mut sock, _) = listener.accept().await.unwrap();
+            // Drain request headers (read until \r\n\r\n).
+            let mut buf = [0u8; 4096];
+            let mut total = 0;
+            loop {
+                let n = tokio::io::AsyncReadExt::read(&mut sock, &mut buf[total..])
+                    .await
+                    .unwrap();
+                if n == 0 {
+                    break;
+                }
+                total += n;
+                if buf[..total].windows(4).any(|w| w == b"\r\n\r\n") {
+                    break;
+                }
+            }
+            // Respond with chunked transfer encoding, no Content-Length.
+            let response = b"HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\nContent-Encoding: identity\r\n\r\n5\r\nhello\r\n0\r\n\r\n";
+            sock.write_all(response).await.unwrap();
+            sock.flush().await.unwrap();
+        });
+
+        let client = RatiClient::new(format!("http://{addr}")).unwrap();
+        let tile = TileId { level: 0, id: 529 };
+        let err = client
+            .fetch_size(tile, Encoding::Identity)
+            .await
+            .unwrap_err();
+        match err {
+            FetchError::MissingContentLength { path } => {
+                assert_eq!(path, "0/000/529.gph");
+            }
+            other => panic!("expected MissingContentLength, got {other:?}"),
+        }
     }
 }

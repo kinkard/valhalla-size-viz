@@ -1,13 +1,24 @@
 use std::sync::Arc;
 
 use axum::{Json, extract::State, http::StatusCode};
-use futures::StreamExt;
+use dashmap::DashMap;
+use futures_util::StreamExt;
+use rustc_hash::FxBuildHasher;
 use serde::{Deserialize, Serialize};
 use tokio::sync::Semaphore;
 
-use crate::cache::{CacheKey, SizeCache};
 use crate::tiles::{Encoding, TileId};
 use crate::upstream::{FetchOutcome, RatiClient};
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct CacheKey {
+    pub level: u8,
+    pub tile_id: u32,
+    pub encoding: Encoding,
+}
+
+/// In-memory tile-size cache. `Some(bytes)` for a known size, `None` for a confirmed 404.
+pub type SizeCache = DashMap<CacheKey, Option<u64>, FxBuildHasher>;
 
 // Soft cap: country-mode level-2 selections are in the low thousands; 20k is a
 // comfortable ceiling that fits inside axum's default 2 MiB body limit and
@@ -20,8 +31,6 @@ pub struct AppState {
     pub cache: Arc<SizeCache>,
     /// Bounds upstream fan-out globally across all concurrent requests.
     pub upstream_permits: Arc<Semaphore>,
-    /// Configured concurrency value, kept for display/health.
-    pub concurrency: usize,
 }
 
 #[derive(Debug, Deserialize)]
@@ -111,7 +120,7 @@ pub async fn tile_sizes(
     let buffer_size = permits.available_permits().max(1).min(misses.len().max(1));
 
     let fetched: Vec<(usize, TileId, Result<FetchOutcome, String>)> =
-        futures::stream::iter(misses.into_iter().map(|(idx, tile)| {
+        futures_util::stream::iter(misses.into_iter().map(|(idx, tile)| {
             let rati = rati.clone();
             let permits = permits.clone();
             async move {
@@ -193,7 +202,6 @@ mod tests {
         routing::{MethodRouter, post},
     };
     use pretty_assertions::assert_eq;
-    use rustc_hash::FxBuildHasher;
     use serde_json::{Value, json};
     use std::sync::atomic::{AtomicUsize, Ordering};
     use std::time::Duration;
@@ -237,7 +245,6 @@ mod tests {
             rati: Arc::new(RatiClient::new(base_url.to_string()).unwrap()),
             cache: Arc::new(SizeCache::with_hasher(FxBuildHasher)),
             upstream_permits: Arc::new(Semaphore::new(concurrency)),
-            concurrency,
         }
     }
 

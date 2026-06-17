@@ -1,12 +1,36 @@
-use std::{num::NonZeroU16, sync::Arc};
+use std::{
+    num::NonZeroU16,
+    path::{Path, PathBuf},
+    sync::Arc,
+};
 
+use axum::{
+    Router,
+    extract::DefaultBodyLimit,
+    http::StatusCode,
+    response::Html,
+    routing::{get, post},
+};
 use clap::Parser;
 use rustc_hash::FxBuildHasher;
-use tokio::{signal, sync::Semaphore};
-use tower_http::trace::TraceLayer;
+use tokio::{fs::File, io::AsyncReadExt, signal, sync::Semaphore};
+use tower_http::{services::ServeDir, trace::TraceLayer};
 use tracing::info;
 
-use valhalla_size_viz::{AppState, RatiClient, SizeCache, build_router};
+use crate::api::{AppState, SizeCache, tile_sizes};
+use crate::upstream::RatiClient;
+
+mod api;
+mod tiles;
+mod upstream;
+
+/// Where the bundled HTML/JS lives on disk. Same directory used by `ServeDir`
+/// for `countries.js`, `poly-data.js`, and the `poly/` GeoJSON tree.
+const WEB_DIR: &str = "web";
+
+/// Default upper bound for JSON request bodies. 4 MiB comfortably fits a
+/// MAX_BATCH_SIZE batch (~25 bytes per tile) with headroom.
+const REQUEST_BODY_LIMIT: usize = 4 * 1024 * 1024;
 
 #[derive(Parser, Debug)]
 #[command(version, about)]
@@ -27,9 +51,11 @@ fn main() {
 
     let config = Config::parse();
 
-    // The upstream concurrency knob bounds I/O fan-out, not CPU parallelism;
-    // let tokio pick a reasonable worker-thread count on its own.
+    // 4 worker threads is plenty for an I/O-bound proxy — async tasks share
+    // threads, so we don't need one per in-flight upstream request. The
+    // `--concurrency` flag bounds upstream fan-out via a Semaphore instead.
     tokio::runtime::Builder::new_multi_thread()
+        .worker_threads(4)
         .enable_all()
         .build()
         .expect("failed to build tokio runtime")
@@ -44,7 +70,6 @@ async fn run(config: Config) {
         rati,
         cache: Arc::new(SizeCache::with_hasher(FxBuildHasher)),
         upstream_permits: Arc::new(Semaphore::new(concurrency)),
-        concurrency,
     };
 
     let app = build_router(state).layer(TraceLayer::new_for_http());
@@ -66,6 +91,57 @@ async fn run(config: Config) {
         .with_graceful_shutdown(shutdown_signal())
         .await
         .expect("axum::serve failed");
+}
+
+fn build_router(state: AppState) -> Router {
+    Router::new()
+        .route("/", get(serve_index))
+        .route(
+            "/api/tile-sizes",
+            post(tile_sizes).layer(DefaultBodyLimit::max(REQUEST_BODY_LIMIT)),
+        )
+        .route("/healthz", get(healthz))
+        // Fallback for `countries.js`, `poly-data.js`, and the `poly/` GeoJSON tree.
+        .fallback_service(ServeDir::new(WEB_DIR))
+        .with_state(state)
+}
+
+async fn serve_index() -> Result<Html<String>, (StatusCode, String)> {
+    serve_index_html(Path::new(WEB_DIR).join("index.html")).await
+}
+
+/// Read an `index.html` file from disk and return its body.
+async fn serve_index_html(path: impl Into<PathBuf>) -> Result<Html<String>, (StatusCode, String)> {
+    let path = path.into();
+    let mut file = match File::open(&path).await {
+        Ok(file) => file,
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => {
+            return Err((
+                StatusCode::NOT_FOUND,
+                format!("{}: not found", path.display()),
+            ));
+        }
+        Err(err) => {
+            return Err((
+                StatusCode::INTERNAL_SERVER_ERROR,
+                format!("failed to open {}: {err}", path.display()),
+            ));
+        }
+    };
+
+    let mut contents = String::new();
+    if let Err(err) = file.read_to_string(&mut contents).await {
+        return Err((
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("failed to read {}: {err}", path.display()),
+        ));
+    }
+
+    Ok(Html(contents))
+}
+
+async fn healthz() -> &'static str {
+    "OK"
 }
 
 async fn shutdown_signal() {
@@ -99,7 +175,6 @@ mod tests {
             rati: Arc::new(RatiClient::new("http://localhost:0".to_string()).unwrap()),
             cache: Arc::new(SizeCache::with_hasher(FxBuildHasher)),
             upstream_permits: Arc::new(Semaphore::new(32)),
-            concurrency: 32,
         }
     }
 
