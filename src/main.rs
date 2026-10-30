@@ -67,15 +67,8 @@ fn main() {
 
 async fn run(config: Config) {
     let concurrency = usize::from(config.concurrency.get());
-    let http = reqwest::Client::builder()
-        .no_gzip()
-        .no_brotli()
-        .no_deflate()
-        .timeout(UPSTREAM_TIMEOUT)
-        .build()
-        .expect("failed to build reqwest client");
     let state = AppState {
-        http,
+        http: http_client(),
         base_url: Arc::from(config.rati_url.as_str()),
         cache: Arc::new(SizeCache::with_hasher(FxBuildHasher)),
         concurrency,
@@ -235,6 +228,22 @@ enum FetchError {
     Upstream { status: u16, path: String },
     #[error("upstream returned 200 OK without Content-Length for {path}")]
     MissingContentLength { path: String },
+}
+
+/// Upstream client. Decompression stays off so `Content-Length` is the
+/// encoded tile size rati sent, which is what we report.
+fn http_client() -> reqwest::Client {
+    // reqwest is built with `rustls-no-provider` to keep rustls on ring instead of its default aws-lc;
+    // the provider is process-wide, so a second install (tests build many clients) is a harmless no-op.
+    let _ = rustls::crypto::ring::default_provider().install_default();
+    reqwest::Client::builder()
+        .no_gzip()
+        .no_brotli()
+        .no_zstd()
+        .no_deflate()
+        .timeout(UPSTREAM_TIMEOUT)
+        .build()
+        .expect("failed to build reqwest client")
 }
 
 async fn fetch_tile_size(
@@ -491,13 +500,7 @@ mod tests {
 
     fn test_state(base_url: &str, concurrency: usize) -> AppState {
         AppState {
-            http: reqwest::Client::builder()
-                .no_gzip()
-                .no_brotli()
-                .no_deflate()
-                .timeout(UPSTREAM_TIMEOUT)
-                .build()
-                .unwrap(),
+            http: http_client(),
             base_url: Arc::from(base_url),
             cache: Arc::new(SizeCache::with_hasher(FxBuildHasher)),
             concurrency,
@@ -650,16 +653,6 @@ mod tests {
     }
 
     // ---- fetch_tile_size ----
-
-    fn http_client() -> reqwest::Client {
-        reqwest::Client::builder()
-            .no_gzip()
-            .no_brotli()
-            .no_deflate()
-            .timeout(UPSTREAM_TIMEOUT)
-            .build()
-            .unwrap()
-    }
 
     fn tile_2_818_660() -> TileId {
         TileId {
